@@ -20,6 +20,10 @@ CLEANFILES += version.c
 EXTRA_DIST += version.c.in
 
 
+bin_PROGRAMS += mutti
+BUILT_SOURCES += mutti.yucc
+
+
 ## version rules
 version.c: version.c.in $(top_builddir)/.version
 	$(AM_V_GEN) PATH="$(top_builddir)/build-aux:$${PATH}" \
