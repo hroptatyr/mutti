@@ -20,6 +20,14 @@ CLEANFILES += version.c
 EXTRA_DIST += version.c.in
 
 
+lib_LTLIBRARIES += libmutti.la
+libmutti_la_SOURCES =
+EXTRA_libmutti_la_SOURCES =
+libmutti_la_SOURCES += instant.c instant.h
+libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
+EXTRA_libmutti_la_SOURCES += wikisort.c
+
+
 bin_PROGRAMS += mutti
 BUILT_SOURCES += mutti.yucc
 
