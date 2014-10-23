@@ -79,17 +79,7 @@ __doy(echs_instant_t i)
 }
 
 
-#define T	echs_instant_t
-
-static inline __attribute__((const, pure)) bool
-compare(T i1, T i2)
-{
-	return echs_instant_lt_p(i1, i2);
-}
-
-#include "wikisort.c"
-
-
+/* public API */
 echs_instant_t
 echs_instant_fixup(echs_instant_t e)
 {
@@ -261,6 +251,18 @@ fixup_d:
 	res.y = y;
 	return res;
 }
+
+
+/* sorting */
+#define T	echs_instant_t
+
+static inline __attribute__((const, pure)) bool
+compare(T i1, T i2)
+{
+	return echs_instant_lt_p(i1, i2);
+}
+
+#include "wikisort.c"
 
 void
 echs_instant_sort(echs_instant_t *restrict in, size_t nin)
