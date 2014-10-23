@@ -41,6 +41,19 @@
 #include "nifty.h"
 
 
+echs_range_t
+echs_range_coalesce(echs_range_t r1, echs_range_t r2)
+{
+	if (echs_instant_le_p(r2.from, r1.till)) {
+		return (echs_range_t){r1.from, r2.till};
+	} else if (echs_instant_le_p(r1.from, r2.till)) {
+		return (echs_range_t){r2.from, r1.till};
+	}
+	return echs_nul_range();
+}
+
+
+/* sorting */
 #define T	echs_range_t
 
 static inline __attribute__((const, pure)) bool

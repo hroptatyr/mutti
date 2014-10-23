@@ -49,6 +49,10 @@ typedef struct {
  * Sort an array IN of NIN elements stable and in-place. */
 extern void echs_range_sort(echs_range_t *restrict in, size_t nin);
 
+/**
+ * Coalesce two ranges into one, or return the nul range if not possible. */
+extern echs_range_t echs_range_coalesce(echs_range_t, echs_range_t);
+
 
 #define ECHS_UNTIL_CHANGED	ECHS_END_OF_TIME
 #define ECHS_FOREVER		ECHS_END_OF_TIME
