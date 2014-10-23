@@ -1,6 +1,6 @@
-/*** nifty.h -- generally handy macroes
+/*** range.c -- some notion of intervals
  *
- * Copyright (C) 2009-2014 Sebastian Freundt
+ * Copyright (C) 2012-2014 Sebastian Freundt
  *
  * Author:  Sebastian Freundt <freundt@ga-group.nl>
  *
@@ -34,58 +34,41 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_nifty_h_
-#define INCLUDED_nifty_h_
+#if defined HAVE_CONFIG_H
+# include "config.h"
+#endif	/* HAVE_CONFIG_H */
+#include "range.h"
+#include "nifty.h"
 
-#if !defined LIKELY
-# define LIKELY(_x)	__builtin_expect((_x), 1)
-#endif	/* !LIKELY */
-#if !defined UNLIKELY
-# define UNLIKELY(_x)	__builtin_expect((_x), 0)
-#endif	/* UNLIKELY */
-
-#if !defined UNUSED
-# define UNUSED(_x)	_x __attribute__((unused))
-#endif	/* !UNUSED */
-
-#if !defined ALGN
-# define ALGN(_x, to)	_x __attribute__((aligned(to)))
-#endif	/* !ALGN */
-
-#if !defined countof
-# define countof(x)	(sizeof(x) / sizeof(*x))
-#endif	/* !countof */
-
-#define _paste(x, y)	x ## y
-#define paste(x, y)	_paste(x, y)
-
-#if !defined with
-# define with(args...)							\
-	for (args, *paste(__ep, __LINE__) = (void*)1;			\
-	     paste(__ep, __LINE__); paste(__ep, __LINE__)= 0)
-#endif	/* !with */
-
-#if !defined if_with
-# define if_with(init, args...)					\
-	for (init, *paste(__ep, __LINE__) = (void*)1;			\
-	     paste(__ep, __LINE__) && (args); paste(__ep, __LINE__)= 0)
-#endif	/* !if_with */
-
-#define once					\
-	static int paste(__, __LINE__);		\
-	if (!paste(__, __LINE__)++)
-#define but_first				\
-	static int paste(__, __LINE__);		\
-	if (paste(__, __LINE__)++)
-
-static inline void*
-deconst(const void *cp)
+
+echs_range_t
+echs_range_coalesce(echs_range_t r1, echs_range_t r2)
 {
-	union {
-		const void *c;
-		void *p;
-	} tmp = {cp};
-	return tmp.p;
+	if (echs_instant_le_p(r2.from, r1.till)) {
+		return (echs_range_t){r1.from, r2.till};
+	} else if (echs_instant_le_p(r1.from, r2.till)) {
+		return (echs_range_t){r2.from, r1.till};
+	}
+	return echs_nul_range();
 }
 
-#endif	/* INCLUDED_nifty_h_ */
+
+/* sorting */
+#define T	echs_range_t
+
+static inline __attribute__((const, pure)) bool
+compare(T i1, T i2)
+{
+	return echs_instant_lt_p(i1.from, i2.from);
+}
+
+#include "wikisort.c"
+
+void
+echs_range_sort(echs_range_t *restrict in, size_t nin)
+{
+	WikiSort(in, nin);
+	return;
+}
+
+/* range.c ends here */

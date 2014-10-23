@@ -96,6 +96,10 @@ extern void echs_instant_sort(echs_instant_t *restrict in, size_t nin);
 
 #define ECHS_ALL_DAY	(0xffU)
 #define ECHS_ALL_SEC	(0x3ffU)
+#define ECHS_NUL_INSTANT	((echs_instant_t){.u = 0ULL})
+#define ECHS_END_OF_TIME	((echs_instant_t){.u = -1ULL})
+#define ECHS_MIN_INSTANT	ECHS_NUL_INSTANT
+#define ECHS_MAX_INSTANT	ECHS_END_OF_TIME
 
 static inline __attribute__((const, pure)) bool
 echs_instant_all_day_p(echs_instant_t i)
@@ -107,12 +111,6 @@ static inline __attribute__((const, pure)) bool
 echs_instant_all_sec_p(echs_instant_t i)
 {
 	return i.ms == ECHS_ALL_SEC;
-}
-
-static inline __attribute__((const, pure)) bool
-echs_instant_0_p(echs_instant_t x)
-{
-	return x.u == 0U;
 }
 
 static inline __attribute__((const, pure)) bool
@@ -140,14 +138,25 @@ echs_instant_eq_p(echs_instant_t x, echs_instant_t y)
 static inline __attribute__((const, pure)) echs_instant_t
 echs_nul_instant(void)
 {
-	static const echs_instant_t nul = {.u = 0ULL};
-	return nul;
+	return ECHS_NUL_INSTANT;
 }
 
 static inline __attribute__((const, pure)) bool
 echs_nul_instant_p(echs_instant_t x)
 {
 	return x.u == 0ULL;
+}
+
+static inline __attribute__((const, pure)) echs_instant_t
+echs_end_of_time(void)
+{
+	return ECHS_END_OF_TIME;
+}
+
+static inline __attribute__((const, pure)) bool
+echs_end_of_time_p(echs_instant_t x)
+{
+	return x.u == -1ULL;
 }
 
 static inline __attribute__((const, pure)) echs_instant_t
@@ -165,22 +174,22 @@ echs_min_instant_p(echs_instant_t x)
 static inline __attribute__((const, pure)) echs_instant_t
 echs_max_instant(void)
 {
-	static const echs_instant_t i = {.u = -1ULL};
-	return i;
+	return echs_end_of_time();
 }
 
 static inline __attribute__((const, pure)) bool
 echs_max_instant_p(echs_instant_t x)
 {
-	return x.u == -1ULL;
+	return echs_end_of_time_p(x);
 }
 
 
+#define ECHS_NUL_IDIFF	((echs_idiff_t){0U, 0U})
+
 static inline __attribute__((const, pure)) echs_idiff_t
 echs_nul_idiff(void)
 {
-	static const echs_idiff_t nul = {0U, 0U};
-	return nul;
+	return ECHS_NUL_IDIFF;
 }
 
 static inline __attribute__((const, pure)) bool
