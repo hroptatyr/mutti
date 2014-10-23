@@ -37,6 +37,8 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <time.h>
+#include <sys/time.h>
 #include "instant.h"
 #include "nifty.h"
 
@@ -45,12 +47,19 @@ static const unsigned int doy[] = {
 	365U, 396U, 424U, 455U, 485U, 516U, 546U, 577U, 608U, 638U, 669U, 699U,
 };
 
+/* all with regard to UTC, i.e. constant numbers of seconds in a day */
 #define HOURS_PER_DAY	(24U)
 #define MINS_PER_HOUR	(60U)
 #define SECS_PER_MIN	(60U)
 #define MSECS_PER_SEC	(1000U)
 #define SECS_PER_DAY	(HOURS_PER_DAY * MINS_PER_HOUR * SECS_PER_MIN)
 #define MSECS_PER_DAY	(SECS_PER_DAY * MSECS_PER_SEC)
+
+static inline __attribute__((const, pure)) bool
+__leapp(unsigned int y)
+{
+	return !(y % 4U);
+}
 
 static __attribute__((const, pure)) inline unsigned int
 __get_ndom(unsigned int y, unsigned int m)
@@ -61,7 +70,7 @@ __get_ndom(unsigned int y, unsigned int m)
 	};
 	unsigned int res = mdays[m];
 
-	if (UNLIKELY(!(y % 4U) && m == 2U)) {
+	if (UNLIKELY(__leapp(y) && m == 2U)) {
 		res++;
 	}
 	return res;
@@ -74,6 +83,85 @@ __doy(echs_instant_t i)
 
 	if (UNLIKELY((i.y % 4U) == 0) && i.m >= 3) {
 		res++;
+	}
+	return res;
+}
+
+static echs_instant_t
+__instant_gmtime(const time_t t)
+{
+	static uint16_t __mon_yday[] = {
+		/* this is \sum ml,
+		 * first element is a bit set of leap days to add */
+		0xfff8, 0,
+		31, 59, 90, 120, 151, 181,
+		212, 243, 273, 304, 334, 365
+	};
+	register int days;
+	register unsigned int yy;
+	const uint16_t *ip;
+	echs_instant_t res;
+
+	/* just go to day computation */
+	days = (int)(t / SECS_PER_DAY);
+
+	/* gotta do the date now */
+	yy = 1970;
+	/* stolen from libc */
+#define DIV(a, b)		((a) / (b))
+/* we only care about 1901 to 2099 and there are no bullshit leap years */
+#define LEAPS_TILL(y)		(DIV(y, 4))
+	while (days < 0 || days >= (!__leapp(yy) ? 365 : 366)) {
+		/* Guess a corrected year, assuming 365 days per year. */
+		register unsigned int yg = yy + days / 365 - (days % 365 < 0);
+
+		/* Adjust DAYS and Y to match the guessed year.  */
+		days -= (yg - yy) * 365 +
+			LEAPS_TILL(yg - 1) - LEAPS_TILL(yy - 1);
+		yy = yg;
+	}
+	/* set the year */
+	res.y = (int)yy;
+
+	ip = __mon_yday;
+	/* unrolled */
+	yy = 13;
+	if (days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy] &&
+	    days < ip[--yy]) {
+		yy = 1;
+	}
+	/* set the rest of the tm structure */
+	res.m = yy;
+	res.d = days - ip[yy] + 1;
+	/* fix up leap years */
+	if (UNLIKELY(__leapp(res.y))) {
+		if ((ip[0] >> (yy)) & 1) {
+			if (UNLIKELY(days == 59)) {
+				res.m = 2;
+				res.d = 29;
+			} else if (UNLIKELY(days == ip[yy])) {
+				res.d = days - ip[--res.m];
+			} else {
+				res.d--;
+			}
+		}
+	}
+	with (unsigned int S = t % SECS_PER_DAY) {
+		res.ms = 0U;
+		res.S = S % SECS_PER_MIN;
+		S /= SECS_PER_MIN;
+		res.M = S % MINS_PER_HOUR;
+		S /= MINS_PER_HOUR;
+		res.H = S;
 	}
 	return res;
 }
@@ -249,6 +337,20 @@ fixup_d:
 	res.d = d;
 	res.m = m;
 	res.y = y;
+	return res;
+}
+
+echs_instant_t
+echs_now(void)
+{
+	struct timeval tv;
+	echs_instant_t res;
+
+	if (UNLIKELY(gettimeofday(&tv, NULL) < 0)) {
+		return ECHS_NUL_INSTANT;
+	}
+	res = __instant_gmtime(tv.tv_sec);
+	res.ms = tv.tv_usec / 1000;
 	return res;
 }
 
