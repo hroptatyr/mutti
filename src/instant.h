@@ -93,6 +93,10 @@ extern echs_instant_t echs_instant_add(echs_instant_t bas, echs_idiff_t add);
  * Sort an array IN of NIN elements stable and in-place. */
 extern void echs_instant_sort(echs_instant_t *restrict in, size_t nin);
 
+/**
+ * Return current system time as echs_instant_t. */
+extern echs_instant_t echs_now(void);
+
 
 #define ECHS_ALL_DAY	(0xffU)
 #define ECHS_ALL_SEC	(0x3ffU)
@@ -100,6 +104,7 @@ extern void echs_instant_sort(echs_instant_t *restrict in, size_t nin);
 #define ECHS_END_OF_TIME	((echs_instant_t){.u = -1ULL})
 #define ECHS_MIN_INSTANT	ECHS_NUL_INSTANT
 #define ECHS_MAX_INSTANT	ECHS_END_OF_TIME
+#define ECHS_NOW		(echs_now())
 
 static inline __attribute__((const, pure)) bool
 echs_instant_all_day_p(echs_instant_t i)
