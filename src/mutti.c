@@ -45,6 +45,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include "dt-strpf.h"
+#include "bitte.h"
 #include "nifty.h"
 
 
@@ -65,8 +67,51 @@ error(const char *fmt, ...)
 	return;
 }
 
+static size_t
+strf_range(char *restrict buf, size_t bsz, echs_range_t r)
+{
+	size_t res = 0U;
+
+	buf[res++] = '[';
+	if (echs_empty_range_p(r)) {
+		goto out;
+	}
+	res += dt_strf(buf + res, bsz - res, r.from);
+	buf[res++] = ',';
+	if (!echs_end_of_time_p(r.till)) {
+		res += dt_strf(buf + res, bsz - res, r.till);
+	} else {
+		memcpy(buf + res, "\u221e", sizeof("\u221e"));
+		res += sizeof("\u221e") - 1U;
+	}
+out:
+	buf[res++] = ')';
+	buf[res] = '\0';
+	return res;
+}
+
 
 #include "mutti.yucc"
+
+static int
+cmd_show(const struct yuck_cmd_show_s argi[static 1U])
+{
+/* [A,FE) x [2014-10-22T12:30:00.000,UC) */
+	echs_range_t r;
+	char buf[64U];
+
+	bitte_add((void*)0xcafe, (echs_range_t){
+			  {.y = 2012, .m = 10, .d = 01, .H = ECHS_ALL_DAY},
+			  ECHS_FOREVER});
+	r = bitte_trans((void*)0xcafe, echs_now());
+	strf_range(buf, sizeof(buf), r);
+	puts(buf);
+
+	r = bitte_valid((void*)0xcafe, echs_now());
+	strf_range(buf, sizeof(buf), r);
+	puts(buf);
+	return 0;
+}
 
 int
 main(int argc, char *argv[])
@@ -81,6 +126,7 @@ main(int argc, char *argv[])
 
 	switch (argi->cmd) {
 	case MUTTI_CMD_SHOW:
+		cmd_show((void*)argi);
 		break;
 
 	case MUTTI_CMD_NONE:
