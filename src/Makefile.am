@@ -24,6 +24,7 @@ lib_LTLIBRARIES += libmutti.la
 libmutti_la_SOURCES =
 EXTRA_libmutti_la_SOURCES =
 libmutti_la_SOURCES += instant.c instant.h
+libmutti_la_SOURCES += range.c range.h
 libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
 EXTRA_libmutti_la_SOURCES += wikisort.c
 
