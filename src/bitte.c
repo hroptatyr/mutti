@@ -48,7 +48,7 @@
 
 /* try SoA */
 static size_t nitems;
-static const void **items;
+static mut_oid_t *items;
 static echs_range_t **valids;
 static echs_instant_t **transs;
 static size_t *ntrans;
@@ -63,7 +63,7 @@ recalloc(void *ptr, size_t old, size_t new, size_t membz)
 }
 
 static size_t
-_get_item(const void *item)
+_get_item(mut_oid_t item)
 {
 	for (size_t i = 0U; i < nitems; i++) {
 		if (items[i] == item) {
@@ -75,7 +75,7 @@ _get_item(const void *item)
 
 
 echs_range_t
-bitte_valid(const void *item, echs_instant_t as_of)
+bitte_valid(mut_oid_t item, echs_instant_t as_of)
 {
 	/* check that we've got ITEM already */
 	size_t i = _get_item(item);
@@ -100,7 +100,7 @@ bitte_valid(const void *item, echs_instant_t as_of)
 }
 
 echs_range_t
-bitte_trans(const void *item, echs_instant_t as_of)
+bitte_trans(mut_oid_t item, echs_instant_t as_of)
 {
 	/* check that we've got ITEM already */
 	size_t i = _get_item(item);
@@ -128,7 +128,7 @@ bitte_trans(const void *item, echs_instant_t as_of)
 }
 
 echs_bitmp_t
-bitte_get(const void *item, echs_instant_t as_of)
+bitte_get(mut_oid_t item, echs_instant_t as_of)
 {
 	/* check that we've got ITEM already */
 	size_t i = _get_item(item);
@@ -158,7 +158,7 @@ bitte_get(const void *item, echs_instant_t as_of)
 }
 
 int
-bitte_add(const void *item, echs_range_t valid)
+bitte_add(mut_oid_t item, echs_range_t valid)
 {
 	/* check if we've got ITEM already */
 	size_t i = _get_item(item);
@@ -190,7 +190,7 @@ bitte_add(const void *item, echs_range_t valid)
 }
 
 int
-bitte_rem(const void *item)
+bitte_rem(mut_oid_t item)
 {
 /* this does nothing but to stamp off the last trans instant
  * nothing will be removed */

@@ -36,6 +36,7 @@
  ***/
 #if !defined INCLUDED_bitte_h_
 #define INCLUDED_bitte_h_
+#include <stdint.h>
 #include "instant.h"
 #include "range.h"
 
@@ -43,6 +44,8 @@
 #define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
 #define ECHS_EMPTY_BITMP					\
 	((echs_bitmp_t){ECHS_EMPTY_RANGE, ECHS_EMPTY_RANGE})
+
+typedef uintptr_t mut_oid_t;
 
 typedef struct {
 	echs_range_t valid;
@@ -52,22 +55,22 @@ typedef struct {
 
 /**
  * Return the valid time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_valid(const void *item, echs_instant_t as_of);
+extern echs_range_t bitte_valid(mut_oid_t item, echs_instant_t as_of);
 
 /**
  * Return the transaction time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_trans(const void *item, echs_instant_t as_of);
+extern echs_range_t bitte_trans(mut_oid_t item, echs_instant_t as_of);
 
 /**
  * Return the full bitemporal stamp of ITEM (as of AS_OF). */
-extern echs_bitmp_t bitte_get(const void *item, echs_instant_t as_of);
+extern echs_bitmp_t bitte_get(mut_oid_t item, echs_instant_t as_of);
 
 /**
  * Add ITEM with valid time VALID. */
-extern int bitte_add(const void *item, echs_range_t valid);
+extern int bitte_add(mut_oid_t item, echs_range_t valid);
 
 /**
  * Remove ITEM. */
-extern int bitte_rem(const void *item);
+extern int bitte_rem(mut_oid_t item);
 
 #endif	/* INCLUDED_bitte_h_ */
