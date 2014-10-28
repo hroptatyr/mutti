@@ -81,7 +81,7 @@ echs_empty_range(void)
 static inline __attribute__((pure, const)) bool
 echs_empty_range_p(echs_range_t r)
 {
-	return echs_instant_le_p(r.till, r.from);
+	return echs_end_of_time_p(r.from) && echs_end_of_time_p(r.till);
 }
 
 static inline __attribute__((pure, const)) echs_range_t
