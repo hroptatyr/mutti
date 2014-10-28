@@ -10,6 +10,7 @@ noinst_PROGRAMS =
 lib_LTLIBRARIES =
 noinst_LTLIBRARIES =
 pkglib_LTLIBRARIES =
+pkginclude_HEADERS =
 noinst_HEADERS =
 BUILT_SOURCES =
 EXTRA_DIST = $(BUILT_SOURCES)
@@ -24,11 +25,19 @@ lib_LTLIBRARIES += libmutti.la
 libmutti_la_SOURCES =
 EXTRA_libmutti_la_SOURCES =
 libmutti_la_SOURCES += instant.c instant.h
+libmutti_la_SOURCES += range.c range.h
 libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
+libmutti_la_SOURCES += bitte.c bitte.h
+libmutti_la_LDFLAGS = $(AM_LDFLAGS)
+libmutti_la_LDFLAGS += -lm
 EXTRA_libmutti_la_SOURCES += wikisort.c
 
+pkginclude_HEADERS += instant.h
+pkginclude_HEADERS += range.h
+pkginclude_HEADERS += bitte.h
 
 bin_PROGRAMS += mutti
+mutti_LDADD = libmutti.la
 BUILT_SOURCES += mutti.yucc
 
 
