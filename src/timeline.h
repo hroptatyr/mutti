@@ -1,4 +1,4 @@
-/*** bitte.h -- bitemporal api
+/*** timeline.h -- reverse timeline data structure
  *
  * Copyright (C) 2014 Sebastian Freundt
  *
@@ -34,44 +34,14 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_bitte_h_
-#define INCLUDED_bitte_h_
-#include <stdint.h>
+/**
+ * This is the timeline data structure in reverse.
+ * A block of size PAGESIZE consists of N transaction time stamps ....*/
+#if !defined INCLUDED_timeline_h_
+#define INCLUDED_timeline_h_
 #include "instant.h"
 #include "range.h"
+/* we implement bitemporal access as in bitte.h */
+#include "bitte.h"
 
-#define ECHS_AS_OF_NOW	ECHS_NOW
-#define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
-#define ECHS_EMPTY_BITMP					\
-	((echs_bitmp_t){ECHS_EMPTY_RANGE, ECHS_EMPTY_RANGE})
-
-typedef uintptr_t mut_oid_t;
-#define MUT_NUL_OID	((mut_oid_t)0U)
-
-typedef struct {
-	echs_range_t valid;
-	echs_range_t trans;
-} echs_bitmp_t;
-
-
-/**
- * Return the valid time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_valid(mut_oid_t item, echs_instant_t as_of);
-
-/**
- * Return the transaction time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_trans(mut_oid_t item, echs_instant_t as_of);
-
-/**
- * Return the full bitemporal stamp of ITEM (as of AS_OF). */
-extern echs_bitmp_t bitte_get(mut_oid_t item, echs_instant_t as_of);
-
-/**
- * Add ITEM with valid time VALID. */
-extern int bitte_add(mut_oid_t item, echs_range_t valid);
-
-/**
- * Remove ITEM. */
-extern int bitte_rem(mut_oid_t item);
-
-#endif	/* INCLUDED_bitte_h_ */
+#endif	/* INCLUDED_timeline_h_ */
