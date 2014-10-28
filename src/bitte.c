@@ -93,7 +93,7 @@ bitte_valid(const void *item, echs_instant_t as_of)
 		if (UNLIKELY(!j--)) {
 			break;
 		}
-		/* otherwise we must have a trans [j - 1, j) */
+		/* otherwise we must have a trans [j, j + 1) */
 		return valids[i][j];
 	}
 	return ECHS_EMPTY_RANGE;
@@ -125,6 +125,36 @@ bitte_trans(const void *item, echs_instant_t as_of)
 		};
 	}
 	return ECHS_EMPTY_RANGE;
+}
+
+echs_bitmp_t
+bitte_get(const void *item, echs_instant_t as_of)
+{
+	/* check that we've got ITEM already */
+	size_t i = _get_item(item);
+
+	if (ITEM_NOT_FOUND_P(i)) {
+		/* nothing to be done then */
+		return ECHS_NUL_BITMP;
+	}
+
+	with (size_t j) {
+		const size_t ntr = ntrans[i];
+		const echs_instant_t *tr = transs[i];
+
+		for (j = 0U; j < ntr && echs_instant_le_p(tr[j], as_of); j++);
+		if (UNLIKELY(!j)) {
+			break;
+		}
+		/* otherwise we must have a trans [j - 1, j) */
+		return (echs_bitmp_t){
+			valids[i][j - 1U],
+			(echs_range_t){
+				tr[j - 1],
+				j < ntr ? tr[j] : ECHS_UNTIL_CHANGED}
+		};
+	}
+	return ECHS_EMPTY_BITMP;
 }
 
 int

@@ -40,7 +40,16 @@
 #include "range.h"
 
 #define ECHS_AS_OF_NOW	ECHS_NOW
+#define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
+#define ECHS_EMPTY_BITMP					\
+	((echs_bitmp_t){ECHS_EMPTY_RANGE, ECHS_EMPTY_RANGE})
 
+typedef struct {
+	echs_range_t valid;
+	echs_range_t trans;
+} echs_bitmp_t;
+
+
 /**
  * Return the valid time of ITEM (as of AS_OF). */
 extern echs_range_t bitte_valid(const void *item, echs_instant_t as_of);
@@ -48,6 +57,10 @@ extern echs_range_t bitte_valid(const void *item, echs_instant_t as_of);
 /**
  * Return the transaction time of ITEM (as of AS_OF). */
 extern echs_range_t bitte_trans(const void *item, echs_instant_t as_of);
+
+/**
+ * Return the full bitemporal stamp of ITEM (as of AS_OF). */
+extern echs_bitmp_t bitte_get(const void *item, echs_instant_t as_of);
 
 /**
  * Add ITEM with valid time VALID. */

@@ -90,6 +90,18 @@ out:
 	return res;
 }
 
+static size_t
+strf_bitmp(char *restrict buf, size_t bsz, echs_bitmp_t r)
+{
+	size_t res = 0U;
+
+	res += strf_range(buf, bsz, r.valid);
+	buf[res++] = 'x';
+	res += strf_range(buf + res, bsz - res, r.trans);
+	buf[res] = '\0';
+	return res;
+}
+
 
 #include "mutti.yucc"
 
@@ -97,18 +109,14 @@ static int
 cmd_show(const struct yuck_cmd_show_s argi[static 1U])
 {
 /* [A,FE) x [2014-10-22T12:30:00.000,UC) */
-	echs_range_t r;
+	echs_bitmp_t r;
 	char buf[64U];
 
 	bitte_add((void*)0xcafe, (echs_range_t){
 			  {.y = 2012, .m = 10, .d = 01, .H = ECHS_ALL_DAY},
 			  ECHS_FOREVER});
-	r = bitte_trans((void*)0xcafe, echs_now());
-	strf_range(buf, sizeof(buf), r);
-	puts(buf);
-
-	r = bitte_valid((void*)0xcafe, echs_now());
-	strf_range(buf, sizeof(buf), r);
+	r = bitte_get((void*)0xcafe, echs_now());
+	strf_bitmp(buf, sizeof(buf), r);
 	puts(buf);
 	return 0;
 }
