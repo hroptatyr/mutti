@@ -110,12 +110,17 @@ cmd_show(const struct yuck_cmd_show_s argi[static 1U])
 {
 /* [A,FE) x [2014-10-22T12:30:00.000,UC) */
 	echs_bitmp_t r;
-	char buf[64U];
+	char buf[256U];
 
-	bitte_add((void*)0xcafe, (echs_range_t){
+	bitte_add((mut_oid_t)0xcafe, (echs_range_t){
 			  {.y = 2012, .m = 10, .d = 01, .H = ECHS_ALL_DAY},
 			  ECHS_FOREVER});
-	r = bitte_get((void*)0xcafe, echs_now());
+	r = bitte_get((mut_oid_t)0xcafe, echs_now());
+	strf_bitmp(buf, sizeof(buf), r);
+	puts(buf);
+
+	bitte_rem((mut_oid_t)0xcafe);
+	r = bitte_get((mut_oid_t)0xcafe, echs_now());
 	strf_bitmp(buf, sizeof(buf), r);
 	puts(buf);
 	return 0;
