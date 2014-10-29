@@ -98,13 +98,20 @@ extern void echs_instant_sort(echs_instant_t *restrict in, size_t nin);
 extern echs_instant_t echs_now(void);
 
 
-#define ECHS_ALL_DAY	(0xffU)
-#define ECHS_ALL_SEC	(0x3ffU)
+#define ECHS_ALL_DAY		(0xffU)
+#define ECHS_ALL_SEC		(0x3ffU)
 #define ECHS_NUL_INSTANT	((echs_instant_t){.u = 0ULL})
 #define ECHS_END_OF_TIME	((echs_instant_t){.u = -1ULL})
 #define ECHS_MIN_INSTANT	ECHS_NUL_INSTANT
 #define ECHS_MAX_INSTANT	ECHS_END_OF_TIME
+/**
+ * ECHS_NOW will take the current wall clock time. */
 #define ECHS_NOW		(echs_now())
+/**
+ * ECHS_SOON will return a constant instant that will happen soon.
+ * Use this when the exact wall clock time does not matter but you
+ * want to express an instant that will never be in the past. */
+#define ECHS_SOON		((echs_instant_t){.u = 0xffff0c1f18000000ULL})
 
 static inline __attribute__((const, pure)) bool
 echs_instant_all_day_p(echs_instant_t i)
