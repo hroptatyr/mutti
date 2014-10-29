@@ -60,12 +60,13 @@ main(int argc, char *const argv[])
 {
 	echs_instant_t t0, t1, t2;
 
+	echs_set_now(dt_strp("2014-10-29T12:02:43.666", NULL));
 	bitte_add((mut_oid_t)"Alice_$200",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY));
 	t0 = echs_now();
 	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
-	usleep(2000);
 
+	echs_set_now(dt_strp("2014-10-29T12:02:43.668", NULL));
 	bitte_add((mut_oid_t)"Alice_$200",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY},
@@ -73,8 +74,8 @@ main(int argc, char *const argv[])
 	t1 = echs_now();
 	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
 	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t1));
-	usleep(2000);
 
+	echs_set_now(dt_strp("2014-10-29T12:02:43.671", NULL));
 	bitte_rem((mut_oid_t)"Alice_$200");
 	t2 = echs_now();
 	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
@@ -83,4 +84,4 @@ main(int argc, char *const argv[])
 	return 0;
 }
 
-/* addremget_01.c ends here */
+/* addremget_02.c ends here */

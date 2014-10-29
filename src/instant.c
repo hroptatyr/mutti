@@ -340,18 +340,35 @@ fixup_d:
 	return res;
 }
 
+
+/* metronome/system time */
+static echs_instant_t _echs_now;
+
 echs_instant_t
 echs_now(void)
 {
 	struct timeval tv;
 	echs_instant_t res;
 
-	if (UNLIKELY(gettimeofday(&tv, NULL) < 0)) {
+	if (!echs_nul_instant_p(_echs_now)) {
+		return _echs_now;
+	} else if (UNLIKELY(gettimeofday(&tv, NULL) < 0)) {
 		return ECHS_NUL_INSTANT;
 	}
 	res = __instant_gmtime(tv.tv_sec);
 	res.ms = tv.tv_usec / 1000;
 	return res;
+}
+
+void
+echs_set_now(echs_instant_t i)
+{
+	/* guarantee monotonicity */
+	if (UNLIKELY(echs_nul_instant_p(i)) ||
+	    LIKELY(echs_instant_lt_p(_echs_now, i))) {
+		_echs_now = i;
+	}
+	return;
 }
 
 

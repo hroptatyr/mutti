@@ -25,16 +25,19 @@ mutti_LIBS = -L$(top_builddir)/src/ -lmutti
 
 ## summon our helper
 include clitoris.am
+AM_CLIT_LOG_FLAGS = --builddir $(builddir) --verbose
 
 TESTS += $(bin_tests)
 bin_tests =
+TESTS += $(cli_tests)
+cli_tests =
 
 check_PROGRAMS += addgetrem_01
 addgetrem_01_LDADD = $(mutti_LIBS)
-bin_tests += addgetrem_01
+cli_tests += addgetrem_01.clit
 
 check_PROGRAMS += addgetrem_02
 addgetrem_02_LDADD = $(mutti_LIBS)
-bin_tests += addgetrem_02
+cli_tests += addgetrem_02.clit
 
 ## Makefile.am ends here
