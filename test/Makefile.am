@@ -33,4 +33,8 @@ check_PROGRAMS += addgetrem_01
 addgetrem_01_LDADD = $(mutti_LIBS)
 bin_tests += addgetrem_01
 
+check_PROGRAMS += addgetrem_02
+addgetrem_02_LDADD = $(mutti_LIBS)
+bin_tests += addgetrem_02
+
 ## Makefile.am ends here
