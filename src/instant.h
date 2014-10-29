@@ -97,6 +97,11 @@ extern void echs_instant_sort(echs_instant_t *restrict in, size_t nin);
  * Return current system time as echs_instant_t. */
 extern echs_instant_t echs_now(void);
 
+/**
+ * Set current system time.
+ * Use ECHS_NUL_INSTANT to go back to system provided system time. */
+extern void echs_set_now(echs_instant_t);
+
 
 #define ECHS_ALL_DAY		(0xffU)
 #define ECHS_ALL_SEC		(0x3ffU)
