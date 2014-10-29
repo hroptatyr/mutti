@@ -56,7 +56,6 @@ extern echs_range_t echs_range_coalesce(echs_range_t, echs_range_t);
 
 #define ECHS_UNTIL_CHANGED	ECHS_END_OF_TIME
 #define ECHS_FOREVER		ECHS_END_OF_TIME
-#define ECHS_EMPTY_RANGE	((echs_range_t){ECHS_FOREVER, ECHS_NUL_INSTANT})
 #define ECHS_NUL_RANGE		((echs_range_t){ECHS_NUL_INSTANT, ECHS_NUL_INSTANT})
 #define ECHS_ETERNAL_RANGE	((echs_range_t){ECHS_MIN_INSTANT, ECHS_MAX_INSTANT})
 
@@ -70,12 +69,6 @@ static inline __attribute__((pure, const)) bool
 echs_nul_range_p(echs_range_t r)
 {
 	return echs_nul_instant_p(r.from) && echs_nul_instant_p(r.till);
-}
-
-static inline __attribute__((pure, const)) echs_range_t
-echs_empty_range(void)
-{
-	return ECHS_EMPTY_RANGE;
 }
 
 static inline __attribute__((pure, const)) bool
