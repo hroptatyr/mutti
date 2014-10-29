@@ -38,6 +38,7 @@ EXTRA_libmutti_la_SOURCES += wikisort.c
 pkginclude_HEADERS += instant.h
 pkginclude_HEADERS += range.h
 pkginclude_HEADERS += bitte.h
+pkginclude_HEADERS += dt-strpf.h
 
 bin_PROGRAMS += mutti
 mutti_LDADD = libmutti.la
