@@ -9,6 +9,9 @@ LC_ALL = C
 AM_CFLAGS = $(EXTRA_CFLAGS)
 AM_CPPFLAGS = -D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE=600 -D_BSD_SOURCE
 AM_CPPFLAGS += -DTEST
+AM_CPPFLAGS += $(mutti_CFLAGS)
+AM_LDFLAGS =
+AM_LDFLAGS += $(mutti_LIBS)
 
 EXTRA_DIST = $(BUILT_SOURCES) $(TESTS)
 TESTS =
@@ -17,6 +20,12 @@ BUILT_SOURCES =
 check_PROGRAMS =
 CLEANFILES = $(check_PROGRAMS)
 
+mutti_CFLAGS = -I$(top_srcdir)/src
+mutti_LIBS = -L$(top_builddir)/src/ -lmutti
+
 include clitoris.am
+
+check_PROGRAMS += addgetrem_01
+addgetrem_01_LDADD = $(mutti_LIBS)
 
 ## Makefile.am ends here
