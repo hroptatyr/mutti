@@ -30,6 +30,7 @@ libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
 libmutti_la_SOURCES += bitte.h
 EXTRA_libmutti_la_SOURCES += bitte.c
 libmutti_la_SOURCES += timeline.c timeline.h
+libmutti_la_SOURCES += nifty.h
 libmutti_la_LDFLAGS = $(AM_LDFLAGS)
 libmutti_la_LDFLAGS += -lm
 EXTRA_libmutti_la_SOURCES += wikisort.c
@@ -37,6 +38,7 @@ EXTRA_libmutti_la_SOURCES += wikisort.c
 pkginclude_HEADERS += instant.h
 pkginclude_HEADERS += range.h
 pkginclude_HEADERS += bitte.h
+pkginclude_HEADERS += dt-strpf.h
 
 bin_PROGRAMS += mutti
 mutti_LDADD = libmutti.la
