@@ -66,7 +66,6 @@ static echs_instant_t *trans;
 static mut_oid_t *items;
 static echs_range_t *valids;
 static struct ioff_s live;
-static struct ioff_s dead;
 
 #define ITEM_NOT_FOUND		((size_t)-1)
 #define ITEM_NOT_FOUND_P(x)	(!~(size_t)(x))
@@ -149,23 +148,14 @@ _get_ioff(struct ioff_s v, mut_oid_t item)
 }
 
 static int
-_add_ioff(struct ioff_s *tgt, struct ioff_s *src, mut_oid_t item, size_t last)
+_add_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
 {
-	size_t li, di;
+	size_t i;
 
-	li = _get_ioff(*tgt, item);
-	if (!ITEM_NOT_FOUND_P(li) && tgt->items[li] != MUT_NUL_OID) {
+	i = _get_ioff(*tgt, item);
+	if (!ITEM_NOT_FOUND_P(i) && tgt->items[i] != MUT_NUL_OID) {
 		/* just update him then */
 		goto up_and_out;
-	}
-	/* otherwise try dead data */
-	di = _get_ioff(*src, item);
-	if (!ITEM_NOT_FOUND_P(di) && src->items[di] != MUT_NUL_OID) {
-		/* found him in the cemetery, resurrect */
-		src->items[di] = MUT_NUL_OID;
-		if (!ITEM_NOT_FOUND_P(li)) {
-			goto ass_up_and_out;
-		}
 	}
 	/* we'll have to extend the list of live items */
 	if (UNLIKELY((tgt->nitems % 512U) == 0U)) {
@@ -182,12 +172,11 @@ _add_ioff(struct ioff_s *tgt, struct ioff_s *src, mut_oid_t item, size_t last)
 		tgt->offs = po;
 
 		/* just ass our item */
-		li = tgt->nitems++;
+		i = tgt->nitems++;
 	}
-ass_up_and_out:
-	tgt->items[li] = item;
+	tgt->items[i] = item;
 up_and_out:
-	tgt->offs[li] = last;
+	tgt->offs[i] = last;
 	return 0;
 }
 
@@ -223,14 +212,7 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 		items[ri] = item;
 		valids[ri] = valid;
 
-		/* insert into live data if VALID is open-ended */
-		if (LIKELY(echs_end_of_time_p(valid.till))) {
-			_add_ioff(&live, &dead, item, it);
-		}
-		/* ... into dead data otherwise */
-		else {
-			_add_ioff(&dead, &live, item, it);
-		}
+		_add_ioff(&live, item, it);
 	}
 	return 0;
 }
@@ -238,10 +220,14 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 int
 bitte_rem(mut_oid_t item)
 {
+	const size_t hi = ((ntrans / NTPB) + 1U) * NTPB;
 	const size_t i = _get_ioff(live, item);
 
 	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
 		/* he's dead already */
+		return -1;
+	} else if (echs_nul_range_p(valids[hi - live.offs[i]])) {
+		/* dead already, just */
 		return -1;
 	}
 
@@ -265,17 +251,15 @@ bitte_rem(mut_oid_t item)
 	}
 	/* stamp him off */
 	with (echs_instant_t t = echs_now()) {
-		const size_t hi = ((ntrans / NTPB) + 1U) * NTPB;
 		const size_t it = ntrans++;
 		/* convert to real index */
 		const size_t ri = hi - it - 1U;
-		const size_t prev_ri = hi - live.offs[i] - 1U;
 
 		trans[ri] = t;
 		items[ri] = item;
-		valids[ri] = valids[prev_ri];
+		valids[ri] = echs_nul_range();
 
-		_add_ioff(&dead, &live, item, it);
+		_add_ioff(&live, item, it);
 	}
 	return 0;
 }
@@ -287,36 +271,15 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 	size_t i;
 
 	i = _get_ioff(live, item);
-	if (!ITEM_NOT_FOUND_P(i) && live.items[i] != MUT_NUL_OID) {
-		/* yay */
-		const size_t ri = hi - live.offs[i] - 1U;
-		return (echs_bitmp_t){
-			valids[ri],
-			(echs_range_t){trans[ri], ECHS_UNTIL_CHANGED}
-		};
+	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
+		/* must be dead */
+		return ECHS_NUL_BITMP;
 	}
-
-	i = _get_ioff(dead, item);
-	if (!ITEM_NOT_FOUND_P(i) && dead.items[i] != MUT_NUL_OID) {
-		/* got a dead one */
-		const size_t ri = hi - dead.offs[i] - 1U;
-		size_t pi;
-
-		/* find previous version */
-		for (pi = ri + 1U; pi < ntrans; pi++) {
-			if (items[pi] == item) {
-				break;
-			}
-		}
-		return (echs_bitmp_t){
-			valids[ri],
-			(echs_range_t){trans[pi], trans[ri]}
-		};
-	}
-
+	/* yay, dead or alive, it's in our books */
+	i = hi - live.offs[i] - 1U;
 	return (echs_bitmp_t){
-		ECHS_EMPTY_RANGE,
-		(echs_range_t){trans[hi - ntrans], ECHS_UNTIL_CHANGED}
+		valids[i],
+		(echs_range_t){trans[i], ECHS_UNTIL_CHANGED}
 	};
 }
 
