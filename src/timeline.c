@@ -188,9 +188,9 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 		const size_t znu = ntrans + NTPB;
 		void *nu_t, *nu_i, *nu_v;
 
-		nu_t = xzralloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzralloc(items, ntrans, znu, sizeof(*items));
-		nu_v = xzralloc(valids, ntrans, znu, sizeof(*valids));
+		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
+		nu_i = xzfalloc(items, ntrans, znu, sizeof(*items));
+		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
 
 		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
 			/* try proper munmapping? */
@@ -203,14 +203,11 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
-		const size_t hi = ((ntrans / NTPB) + 1U) * NTPB;
 		const size_t it = ntrans++;
-		/* convert to real index */
-		const size_t ri = hi - it - 1U;
 
-		trans[ri] = t;
-		items[ri] = item;
-		valids[ri] = valid;
+		trans[it] = t;
+		items[it] = item;
+		valids[it] = valid;
 
 		_add_ioff(&live, item, it);
 	}
@@ -220,13 +217,12 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 int
 bitte_rem(mut_oid_t item)
 {
-	const size_t hi = ((ntrans / NTPB) + 1U) * NTPB;
 	const size_t i = _get_ioff(live, item);
 
 	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
 		/* he's dead already */
 		return -1;
-	} else if (echs_nul_range_p(valids[hi - live.offs[i]])) {
+	} else if (echs_nul_range_p(valids[live.offs[i]])) {
 		/* dead already, just */
 		return -1;
 	}
@@ -236,9 +232,9 @@ bitte_rem(mut_oid_t item)
 		const size_t znu = ntrans + NTPB;
 		void *nu_t, *nu_i, *nu_v;
 
-		nu_t = xzralloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzralloc(items, ntrans, znu, sizeof(*items));
-		nu_v = xzralloc(valids, ntrans, znu, sizeof(*valids));
+		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
+		nu_i = xzfalloc(items, ntrans, znu, sizeof(*items));
+		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
 
 		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
 			/* try proper munmapping? */
@@ -252,12 +248,10 @@ bitte_rem(mut_oid_t item)
 	/* stamp him off */
 	with (echs_instant_t t = echs_now()) {
 		const size_t it = ntrans++;
-		/* convert to real index */
-		const size_t ri = hi - it - 1U;
 
-		trans[ri] = t;
-		items[ri] = item;
-		valids[ri] = echs_nul_range();
+		trans[it] = t;
+		items[it] = item;
+		valids[it] = echs_nul_range();
 
 		_add_ioff(&live, item, it);
 	}
@@ -267,7 +261,6 @@ bitte_rem(mut_oid_t item)
 echs_bitmp_t
 bitte_get(mut_oid_t item, echs_instant_t as_of)
 {
-	const size_t hi = ((ntrans / NTPB) + 1U) * NTPB;
 	size_t i;
 
 	i = _get_ioff(live, item);
@@ -276,7 +269,7 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 		return ECHS_NUL_BITMP;
 	}
 	/* yay, dead or alive, it's in our books */
-	i = hi - live.offs[i] - 1U;
+	i = live.offs[i];
 	return (echs_bitmp_t){
 		valids[i],
 		(echs_range_t){trans[i], ECHS_UNTIL_CHANGED}
