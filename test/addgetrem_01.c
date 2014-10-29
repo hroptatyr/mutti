@@ -57,6 +57,7 @@ pr_bitmp(echs_bitmp_t r)
 int
 main(int argc, char *const argv[])
 {
+	echs_set_now(dt_strp("2014-10-29T13:23:41.507", NULL));
 	bitte_add((mut_oid_t)"Alice_$200",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY));
 	bitte_add((mut_oid_t)"Ann_$300",
