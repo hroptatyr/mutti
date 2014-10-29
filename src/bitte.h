@@ -42,8 +42,6 @@
 
 #define ECHS_AS_OF_NOW	ECHS_NOW
 #define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
-#define ECHS_EMPTY_BITMP					\
-	((echs_bitmp_t){ECHS_EMPTY_RANGE, ECHS_EMPTY_RANGE})
 
 typedef uintptr_t mut_oid_t;
 #define MUT_NUL_OID	((mut_oid_t)0U)
