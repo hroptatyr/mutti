@@ -23,9 +23,14 @@ CLEANFILES = $(check_PROGRAMS)
 mutti_CFLAGS = -I$(top_srcdir)/src
 mutti_LIBS = -L$(top_builddir)/src/ -lmutti
 
+## summon our helper
 include clitoris.am
+
+TESTS += $(bin_tests)
+bin_tests =
 
 check_PROGRAMS += addgetrem_01
 addgetrem_01_LDADD = $(mutti_LIBS)
+bin_tests += addgetrem_01
 
 ## Makefile.am ends here
