@@ -119,6 +119,13 @@ cmd_show(const struct yuck_cmd_show_s argi[static 1U])
 	strf_bitmp(buf, sizeof(buf), r);
 	puts(buf);
 
+	bitte_add((mut_oid_t)0xdead, (echs_range_t){
+			  {.y = 2012, .m = 10, .d = 01, .H = ECHS_ALL_DAY},
+			  {.y = 2014, .m = 10, .d = 31, .H = ECHS_ALL_DAY}});
+	r = bitte_get((mut_oid_t)0xdead, echs_now());
+	strf_bitmp(buf, sizeof(buf), r);
+	puts(buf);
+
 	bitte_rem((mut_oid_t)0xcafe);
 	r = bitte_get((mut_oid_t)0xcafe, echs_now());
 	strf_bitmp(buf, sizeof(buf), r);
