@@ -170,10 +170,9 @@ _add_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
 		}
 		tgt->items = pi;
 		tgt->offs = po;
-
-		/* just ass our item */
-		i = tgt->nitems++;
 	}
+	/* just ass our item */
+	i = tgt->nitems++;
 	tgt->items[i] = item;
 up_and_out:
 	tgt->offs[i] = last;
