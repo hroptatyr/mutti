@@ -70,6 +70,8 @@ static struct ioff_s live;
 #define ITEM_NOT_FOUND		((size_t)-1)
 #define ITEM_NOT_FOUND_P(x)	(!~(size_t)(x))
 
+#define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
+
 
 static inline int
 xfree(void *restrict p, size_t z)
@@ -180,6 +182,26 @@ up_and_out:
 }
 
 
+/* meta */
+static echs_bitmp_t
+_bitte_get_as_of_now(mut_oid_t item)
+{
+	size_t i;
+
+	i = _get_ioff(live, item);
+	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
+		/* must be dead */
+		return ECHS_NUL_BITMP;
+	}
+	/* yay, dead or alive, it's in our books */
+	i = live.offs[i];
+	return (echs_bitmp_t){
+		valids[i],
+		(echs_range_t){trans[i], ECHS_UNTIL_CHANGED}
+	};
+}
+
+
 int
 bitte_add(mut_oid_t item, echs_range_t valid)
 {
@@ -260,18 +282,54 @@ bitte_rem(mut_oid_t item)
 echs_bitmp_t
 bitte_get(mut_oid_t item, echs_instant_t as_of)
 {
-	size_t i;
+	size_t i_last_before = ITEM_NOT_FOUND;
+	size_t i_first_after = ITEM_NOT_FOUND;
 
-	i = _get_ioff(live, item);
-	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
-		/* must be dead */
+	if (UNLIKELY(!ntrans)) {
+		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
+	/* if AS_OF is >= the stamp of the last transaction, just use
+	 * the live table. */
+	else if (echs_instant_le_p(trans[ntrans - 1U], as_of)) {
+		return _bitte_get_as_of_now(item);
+	}
+	/* otherwise proceed to scan */
+	with (size_t i = 0U) {
+		for (; i < ntrans && echs_instant_le_p(trans[i], as_of); i++) {
+			if (items[i] == item) {
+				i_last_before = i;
+			}
+		}
+		/* now I_LAST_BEFORE should hold ITEM_NOT_FOUND or the index of
+		 * the last fiddle with ITEM before AS_OF */
+		if (ITEM_NOT_FOUND_P(i_last_before)) {
+			/* must be dead */
+			return ECHS_NUL_BITMP;
+		}
+		/* keep scanning, because the item might have been superseded by
+		 * a more recent transaction */
+		for (; i < ntrans; i++) {
+			if (items[i] == item) {
+				i_first_after = i;
+				break;
+			}
+		}
+		/* now I_FIRST_AFTER should hold ITEM_NOT_FOUND or the index of
+		 * the next fiddle with ITEM on or after AS_OF */
+		if (ITEM_NOT_FOUND_P(i_first_after)) {
+			/* must be open-ended */
+			return (echs_bitmp_t){
+				valids[i_last_before],
+				ECHS_RANGE_FROM(trans[i_last_before])
+			};
+		}
+	}
 	/* yay, dead or alive, it's in our books */
-	i = live.offs[i];
+	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
-		valids[i],
-		(echs_range_t){trans[i], ECHS_UNTIL_CHANGED}
+		valids[i_last_before],
+		(echs_range_t){trans[i_last_before], trans[i_first_after]}
 	};
 }
 
