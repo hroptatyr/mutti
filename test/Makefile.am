@@ -1,8 +1,8 @@
-# Help the Developers and yourself. Just use the C locale and settings
-# for the compilation. They can still be overriden by make LANG=<whatever>
-# but that is general a not very good idea
 include $(top_builddir)/version.mk
 
+## Help the Developers and yourself. Just use the C locale and settings
+## for the compilation. They can still be overriden by make LANG=<whatever>
+## but that is general a not very good idea
 LANG = C
 LC_ALL = C
 
@@ -14,10 +14,9 @@ EXTRA_DIST = $(BUILT_SOURCES) $(TESTS)
 TESTS =
 TEST_EXTENSIONS =
 BUILT_SOURCES =
-dt_tests =
-bin_tests =
-batch_tests =
 check_PROGRAMS =
 CLEANFILES = $(check_PROGRAMS)
+
+include clitoris.am
 
 ## Makefile.am ends here
