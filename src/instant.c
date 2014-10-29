@@ -363,7 +363,11 @@ echs_now(void)
 void
 echs_set_now(echs_instant_t i)
 {
-	_echs_now = i;
+	/* guarantee monotonicity */
+	if (UNLIKELY(echs_nul_instant_p(i)) ||
+	    LIKELY(echs_instant_lt_p(_echs_now, i))) {
+		_echs_now = i;
+	}
 	return;
 }
 
