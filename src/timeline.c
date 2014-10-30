@@ -56,19 +56,19 @@
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
 struct ioff_s {
-	size_t nitems;
-	mut_oid_t *items;
+	size_t nfacts;
+	mut_oid_t *facts;
 	size_t *offs;
 };
 
 static size_t ntrans;
 static echs_instant_t *trans;
-static mut_oid_t *items;
+static mut_oid_t *facts;
 static echs_range_t *valids;
 static struct ioff_s live;
 
-#define ITEM_NOT_FOUND		((size_t)-1)
-#define ITEM_NOT_FOUND_P(x)	(!~(size_t)(x))
+#define FACT_NOT_FOUND		((size_t)-1)
+#define FACT_NOT_FOUND_P(x)	(!~(size_t)(x))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
@@ -128,21 +128,21 @@ xzfalloc(void *restrict p_old, size_t n_old, size_t n_new, size_t z_memb)
 
 
 static size_t
-_get_ioff(struct ioff_s v, mut_oid_t item)
+_get_ioff(struct ioff_s v, mut_oid_t fact)
 {
-	size_t i_fr = ITEM_NOT_FOUND;
+	size_t i_fr = FACT_NOT_FOUND;
 	size_t i;
 
-	for (i = 0U; i < v.nitems; i++) {
-		if (v.items[i] == MUT_NUL_OID) {
+	for (i = 0U; i < v.nfacts; i++) {
+		if (v.facts[i] == MUT_NUL_OID) {
 			i_fr = i;
 			break;
-		} else if (v.items[i] == item) {
+		} else if (v.facts[i] == fact) {
 			return i;
 		}
 	}
-	for (; i < v.nitems; i++) {
-		if (v.items[i] == item) {
+	for (; i < v.nfacts; i++) {
+		if (v.facts[i] == fact) {
 			return i;
 		}
 	}
@@ -150,32 +150,32 @@ _get_ioff(struct ioff_s v, mut_oid_t item)
 }
 
 static int
-_add_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
+_put_ioff(struct ioff_s *tgt, mut_oid_t fact, size_t last)
 {
 	size_t i;
 
-	i = _get_ioff(*tgt, item);
-	if (!ITEM_NOT_FOUND_P(i) && tgt->items[i] != MUT_NUL_OID) {
+	i = _get_ioff(*tgt, fact);
+	if (!FACT_NOT_FOUND_P(i) && tgt->facts[i] != MUT_NUL_OID) {
 		/* just update him then */
 		goto up_and_out;
 	}
-	/* we'll have to extend the list of live items */
-	if (UNLIKELY((tgt->nitems % 512U) == 0U)) {
-		const size_t ol = tgt->nitems;
-		const size_t nu = ol + 512U;
-		void *pi = xzfalloc(tgt->items, ol, nu, sizeof(*tgt->items));
+	/* we'll have to extend the list of live facts */
+	if (UNLIKELY((tgt->nfacts % NTPB) == 0U)) {
+		const size_t ol = tgt->nfacts;
+		const size_t nu = ol + NTPB;
+		void *pi = xzfalloc(tgt->facts, ol, nu, sizeof(*tgt->facts));
 		void *po = xzfalloc(tgt->offs, ol, nu, sizeof(*tgt->offs));
 
 		if (UNLIKELY(pi == NULL || po == NULL)) {
 			/* brill */
 			return -1;
 		}
-		tgt->items = pi;
+		tgt->facts = pi;
 		tgt->offs = po;
 	}
-	/* just ass our item */
-	i = tgt->nitems++;
-	tgt->items[i] = item;
+	/* just ass our fact */
+	i = tgt->nfacts++;
+	tgt->facts[i] = fact;
 up_and_out:
 	tgt->offs[i] = last;
 	return 0;
@@ -184,12 +184,12 @@ up_and_out:
 
 /* meta */
 static echs_bitmp_t
-_bitte_get_as_of_now(mut_oid_t item)
+_bitte_get_as_of_now(mut_oid_t fact)
 {
 	size_t i;
 
-	i = _get_ioff(live, item);
-	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
+	i = _get_ioff(live, fact);
+	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -203,14 +203,14 @@ _bitte_get_as_of_now(mut_oid_t item)
 
 
 int
-bitte_add(mut_oid_t item, echs_range_t valid)
+bitte_put(mut_oid_t fact, echs_range_t valid)
 {
 	if (UNLIKELY(!(ntrans % NTPB))) {
 		const size_t znu = ntrans + NTPB;
 		void *nu_t, *nu_i, *nu_v;
 
 		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzfalloc(items, ntrans, znu, sizeof(*items));
+		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
 		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
 
 		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
@@ -219,7 +219,7 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 		}
 		/* otherwise reassign */
 		trans = nu_t;
-		items = nu_i;
+		facts = nu_i;
 		valids = nu_v;
 	}
 	/* stamp off then */
@@ -227,20 +227,20 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 		const size_t it = ntrans++;
 
 		trans[it] = t;
-		items[it] = item;
+		facts[it] = fact;
 		valids[it] = valid;
 
-		_add_ioff(&live, item, it);
+		_put_ioff(&live, fact, it);
 	}
 	return 0;
 }
 
 int
-bitte_rem(mut_oid_t item)
+bitte_rem(mut_oid_t fact)
 {
-	const size_t i = _get_ioff(live, item);
+	const size_t i = _get_ioff(live, fact);
 
-	if (ITEM_NOT_FOUND_P(i) || live.items[i] == MUT_NUL_OID) {
+	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
 		/* he's dead already */
 		return -1;
 	} else if (echs_nul_range_p(valids[live.offs[i]])) {
@@ -254,7 +254,7 @@ bitte_rem(mut_oid_t item)
 		void *nu_t, *nu_i, *nu_v;
 
 		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzfalloc(items, ntrans, znu, sizeof(*items));
+		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
 		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
 
 		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
@@ -263,7 +263,7 @@ bitte_rem(mut_oid_t item)
 		}
 		/* otherwise reassign */
 		trans = nu_t;
-		items = nu_i;
+		facts = nu_i;
 		valids = nu_v;
 	}
 	/* stamp him off */
@@ -271,19 +271,19 @@ bitte_rem(mut_oid_t item)
 		const size_t it = ntrans++;
 
 		trans[it] = t;
-		items[it] = item;
+		facts[it] = fact;
 		valids[it] = echs_nul_range();
 
-		_add_ioff(&live, item, it);
+		_put_ioff(&live, fact, it);
 	}
 	return 0;
 }
 
 echs_bitmp_t
-bitte_get(mut_oid_t item, echs_instant_t as_of)
+bitte_get(mut_oid_t fact, echs_instant_t as_of)
 {
-	size_t i_last_before = ITEM_NOT_FOUND;
-	size_t i_first_after = ITEM_NOT_FOUND;
+	size_t i_last_before = FACT_NOT_FOUND;
+	size_t i_first_after = FACT_NOT_FOUND;
 
 	if (UNLIKELY(!ntrans)) {
 		/* no transactions in this store, trivial*/
@@ -292,32 +292,32 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
 	else if (echs_instant_le_p(trans[ntrans - 1U], as_of)) {
-		return _bitte_get_as_of_now(item);
+		return _bitte_get_as_of_now(fact);
 	}
 	/* otherwise proceed to scan */
 	with (size_t i = 0U) {
 		for (; i < ntrans && echs_instant_le_p(trans[i], as_of); i++) {
-			if (items[i] == item) {
+			if (facts[i] == fact) {
 				i_last_before = i;
 			}
 		}
-		/* now I_LAST_BEFORE should hold ITEM_NOT_FOUND or the index of
-		 * the last fiddle with ITEM before AS_OF */
-		if (ITEM_NOT_FOUND_P(i_last_before)) {
+		/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
+		 * the last fiddle with FACT before AS_OF */
+		if (FACT_NOT_FOUND_P(i_last_before)) {
 			/* must be dead */
 			return ECHS_NUL_BITMP;
 		}
-		/* keep scanning, because the item might have been superseded by
+		/* keep scanning, because the fact might have been superseded by
 		 * a more recent transaction */
 		for (; i < ntrans; i++) {
-			if (items[i] == item) {
+			if (facts[i] == fact) {
 				i_first_after = i;
 				break;
 			}
 		}
-		/* now I_FIRST_AFTER should hold ITEM_NOT_FOUND or the index of
-		 * the next fiddle with ITEM on or after AS_OF */
-		if (ITEM_NOT_FOUND_P(i_first_after)) {
+		/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
+		 * the next fiddle with FACT on or after AS_OF */
+		if (FACT_NOT_FOUND_P(i_first_after)) {
 			/* must be open-ended */
 			return (echs_bitmp_t){
 				valids[i_last_before],
@@ -333,16 +333,82 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 	};
 }
 
-echs_range_t
-bitte_valid(mut_oid_t item, echs_instant_t as_of)
+int
+bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	return bitte_get(item, as_of).valid;
+	size_t oi;
+
+	oi = _get_ioff(live, old);
+	if (FACT_NOT_FOUND_P(oi) || live.facts[oi] == MUT_NUL_OID) {
+		/* must be dead, cannot supersede */
+		return -1;
+	}
+
+	/* otherwise make room for some (i.e. 2) insertions */
+	if (UNLIKELY(!(ntrans % NTPB) ||
+		     /* we won't need another slot if NEW is a NUL. */
+		     new != MUT_NUL_OID && (ntrans % NTPB + 1U == NTPB))) {
+		/* make sure we've got room for 2 insertions
+		 * just ask for one more and kill the lsb */
+		const size_t znu = ((ntrans + NTPB + 1U) >> 1U) << 1U;
+		void *nu_t, *nu_i, *nu_v;
+
+		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
+		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
+		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
+
+		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
+			/* try proper munmapping? */
+			return -1;
+		}
+		/* otherwise reassign */
+		trans = nu_t;
+		facts = nu_i;
+		valids = nu_v;
+	}
+	/* atomically handle the supersedure */
+	with (echs_instant_t t = echs_now()) {
+		/* old guy first */
+		with (const size_t it = ntrans++) {
+			/* build new validity */
+			echs_range_t nuv = {
+				.from = valids[live.offs[oi]].from,
+				.till = valid.from,
+			};
+
+			/* bang to timeline */
+			trans[it] = t;
+			facts[it] = old;
+			valids[it] = nuv;
+
+			_put_ioff(&live, old, it);
+		}
+		/* new guy now */
+		if (new != MUT_NUL_OID) {
+			const size_t it = ntrans++;
+
+			/* bang to timeline */
+			trans[it] = t;
+			facts[it] = new;
+			valids[it] = valid;
+
+			_put_ioff(&live, new, it);
+		}
+	}
+	return 0;
+}
+
+
+echs_range_t
+bitte_valid(mut_oid_t fact, echs_instant_t as_of)
+{
+	return bitte_get(fact, as_of).valid;
 }
 
 echs_range_t
-bitte_trans(mut_oid_t item, echs_instant_t as_of)
+bitte_trans(mut_oid_t fact, echs_instant_t as_of)
 {
-	return bitte_get(item, as_of).trans;
+	return bitte_get(fact, as_of).trans;
 }
 
 /* timeline.c ends here */

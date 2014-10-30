@@ -40,4 +40,8 @@ check_PROGRAMS += addgetrem_02
 addgetrem_02_LDADD = $(mutti_LIBS)
 cli_tests += addgetrem_02.clit
 
+check_PROGRAMS += addgetrem_03
+addgetrem_02_LDADD = $(mutti_LIBS)
+cli_tests += addgetrem_03.clit
+
 ## Makefile.am ends here

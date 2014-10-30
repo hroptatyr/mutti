@@ -43,12 +43,12 @@
 #include "bitte.h"
 #include "nifty.h"
 
-#define ITEM_NOT_FOUND		((size_t)-1)
-#define ITEM_NOT_FOUND_P(x)	(!~(size_t)(x))
+#define FACT_NOT_FOUND		((size_t)-1)
+#define FACT_NOT_FOUND_P(x)	(!~(size_t)(x))
 
 /* try SoA */
-static size_t nitems;
-static mut_oid_t *items;
+static size_t nfacts;
+static mut_oid_t *facts;
 static echs_range_t **valids;
 static echs_instant_t **transs;
 static size_t *ntrans;
@@ -63,24 +63,24 @@ recalloc(void *ptr, size_t old, size_t new, size_t membz)
 }
 
 static size_t
-_get_item(mut_oid_t item)
+_get_fact(mut_oid_t fact)
 {
-	for (size_t i = 0U; i < nitems; i++) {
-		if (items[i] == item) {
+	for (size_t i = 0U; i < nfacts; i++) {
+		if (facts[i] == fact) {
 			return i;
 		}
 	}
-	return ITEM_NOT_FOUND;
+	return FACT_NOT_FOUND;
 }
 
 
 echs_range_t
-bitte_valid(mut_oid_t item, echs_instant_t as_of)
+bitte_valid(mut_oid_t fact, echs_instant_t as_of)
 {
-	/* check that we've got ITEM already */
-	size_t i = _get_item(item);
+	/* check that we've got FACT already */
+	size_t i = _get_fact(fact);
 
-	if (ITEM_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* nothing to be done then */
 		return ECHS_NUL_RANGE;
 	}
@@ -100,12 +100,12 @@ bitte_valid(mut_oid_t item, echs_instant_t as_of)
 }
 
 echs_range_t
-bitte_trans(mut_oid_t item, echs_instant_t as_of)
+bitte_trans(mut_oid_t fact, echs_instant_t as_of)
 {
-	/* check that we've got ITEM already */
-	size_t i = _get_item(item);
+	/* check that we've got FACT already */
+	size_t i = _get_fact(fact);
 
-	if (ITEM_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* nothing to be done then */
 		return ECHS_NUL_RANGE;
 	}
@@ -128,12 +128,12 @@ bitte_trans(mut_oid_t item, echs_instant_t as_of)
 }
 
 echs_bitmp_t
-bitte_get(mut_oid_t item, echs_instant_t as_of)
+bitte_get(mut_oid_t fact, echs_instant_t as_of)
 {
-	/* check that we've got ITEM already */
-	size_t i = _get_item(item);
+	/* check that we've got FACT already */
+	size_t i = _get_fact(fact);
 
-	if (ITEM_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* nothing to be done then */
 		return ECHS_NUL_BITMP;
 	}
@@ -158,22 +158,22 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 }
 
 int
-bitte_add(mut_oid_t item, echs_range_t valid)
+bitte_put(mut_oid_t fact, echs_range_t valid)
 {
-	/* check if we've got ITEM already */
-	size_t i = _get_item(item);
+	/* check if we've got FACT already */
+	size_t i = _get_fact(fact);
 
-	if (ITEM_NOT_FOUND_P(i)) {
-		if ((nitems % 512U) == 0U) {
-			const size_t nu = nitems + 512U;
-			items = realloc(items, nu * sizeof(*items));
-			valids = recalloc(valids, nitems, nu, sizeof(*valids));
-			transs = recalloc(transs, nitems, nu, sizeof(*transs));
-			ntrans = recalloc(ntrans, nitems, nu, sizeof(*ntrans));
+	if (FACT_NOT_FOUND_P(i)) {
+		if ((nfacts % 512U) == 0U) {
+			const size_t nu = nfacts + 512U;
+			facts = realloc(facts, nu * sizeof(*facts));
+			valids = recalloc(valids, nfacts, nu, sizeof(*valids));
+			transs = recalloc(transs, nfacts, nu, sizeof(*transs));
+			ntrans = recalloc(ntrans, nfacts, nu, sizeof(*ntrans));
 		}
-		/* assign new item */
-		i = nitems++;
-		items[i] = item;
+		/* assign new fact */
+		i = nfacts++;
+		facts[i] = fact;
 	}
 	if ((ntrans[i] % 16U) == 0U) {
 		const size_t nu = ntrans[i] + 16U;
@@ -190,14 +190,14 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 }
 
 int
-bitte_rem(mut_oid_t item)
+bitte_rem(mut_oid_t fact)
 {
 /* this does nothing but to stamp off the last trans instant
  * nothing will be removed */
-	/* check that we've got ITEM already */
-	size_t i = _get_item(item);
+	/* check that we've got FACT already */
+	size_t i = _get_fact(fact);
 
-	if (ITEM_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* nothing to be done then */
 		return -1;
 	}

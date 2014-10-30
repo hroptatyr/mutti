@@ -2,7 +2,6 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
-#include <unistd.h>
 #include <string.h>
 #include <stdio.h>
 #include "dt-strpf.h"
@@ -58,30 +57,31 @@ pr_bitmp(echs_bitmp_t r)
 int
 main(int argc, char *const argv[])
 {
-	echs_instant_t t0, t1, t2;
-
-	echs_set_now(dt_strp("2014-10-29T12:02:43.666", NULL));
+	echs_set_now(dt_strp("2014-10-29T13:23:41.507", NULL));
 	bitte_put((mut_oid_t)"Alice_$200",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY));
-	t0 = echs_now();
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
+	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get((mut_oid_t)"Alice_$500", ECHS_SOON));
 
-	echs_set_now(dt_strp("2014-10-29T12:02:43.668", NULL));
-	bitte_put((mut_oid_t)"Alice_$200",
-		  (echs_range_t){
-			  {.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY},
-			  {.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY}});
-	t1 = echs_now();
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t1));
+	echs_set_now(dt_strp("2014-10-29T14:23:41.507", NULL));
 
-	echs_set_now(dt_strp("2014-10-29T12:02:43.671", NULL));
-	bitte_rem((mut_oid_t)"Alice_$200");
-	t2 = echs_now();
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t0));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t1));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", t2));
+	bitte_supersede((mut_oid_t)"Alice_$200", (mut_oid_t)"Alice_$500",
+		  ECHS_FROM(.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY));
+	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get((mut_oid_t)"Alice_$500", ECHS_SOON));
+
+	echs_set_now(dt_strp("2014-10-29T15:23:41.507", NULL));
+
+	bitte_put((mut_oid_t)"Bob_$700",
+		  ECHS_FROM(.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY));
+	pr_bitmp(bitte_get((mut_oid_t)"Bob_$700", ECHS_SOON));
+
+	echs_set_now(dt_strp("2014-10-29T16:23:41.507", NULL));
+
+	bitte_supersede((mut_oid_t)"Bob_$700", MUT_NUL_OID,
+		  ECHS_FROM(.y = 2012, .m = 01, .d = 13, .H = ECHS_ALL_DAY));
+	pr_bitmp(bitte_get((mut_oid_t)"Bob_$700", ECHS_SOON));
 	return 0;
 }
 
-/* addremget_02.c ends here */
+/* addremget_03.c ends here */
