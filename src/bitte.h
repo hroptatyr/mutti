@@ -53,23 +53,23 @@ typedef struct {
 
 
 /**
- * Return the valid time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_valid(mut_oid_t item, echs_instant_t as_of);
+ * Return the valid time of FACT (as of AS_OF). */
+extern echs_range_t bitte_valid(mut_oid_t fact, echs_instant_t as_of);
 
 /**
- * Return the transaction time of ITEM (as of AS_OF). */
-extern echs_range_t bitte_trans(mut_oid_t item, echs_instant_t as_of);
+ * Return the transaction time of FACT (as of AS_OF). */
+extern echs_range_t bitte_trans(mut_oid_t fact, echs_instant_t as_of);
 
 /**
- * Return the full bitemporal stamp of ITEM (as of AS_OF). */
-extern echs_bitmp_t bitte_get(mut_oid_t item, echs_instant_t as_of);
+ * Return the full bitemporal stamp of FACT (as of AS_OF). */
+extern echs_bitmp_t bitte_get(mut_oid_t fact, echs_instant_t as_of);
 
 /**
- * Put ITEM with valid time VALID. */
-extern int bitte_put(mut_oid_t item, echs_range_t valid);
+ * Put FACT with valid time VALID. */
+extern int bitte_put(mut_oid_t fact, echs_range_t valid);
 
 /**
- * Remove ITEM. */
-extern int bitte_rem(mut_oid_t item);
+ * Remove FACT. */
+extern int bitte_rem(mut_oid_t fact);
 
 #endif	/* INCLUDED_bitte_h_ */
