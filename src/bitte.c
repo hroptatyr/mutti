@@ -45,7 +45,7 @@
 /* at the moment we operate on 4k block sizes */
 #define BLKZ	(4096U)
 /* number of transaction stamps per block */
-#define NTPB	(BLKZ / sizeof(*trans))
+#define NTPB	(BLKZ / sizeof(*stor.trans))
 
 #if !defined MAP_ANON && defined MAP_ANONYMOUS
 # define MAP_ANON	MAP_ANONYMOUS
@@ -55,17 +55,23 @@
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
-struct ioff_s {
+/* simple timeline index */
+struct tili_s {
+	size_t ntrans;
+	echs_instant_t *trans;
+	mut_oid_t *facts;
+	echs_range_t *valids;
+};
+
+/* fact offsets into the timeline */
+struct foff_s {
 	size_t nfacts;
 	mut_oid_t *facts;
 	size_t *offs;
 };
 
-static size_t ntrans;
-static echs_instant_t *trans;
-static mut_oid_t *facts;
-static echs_range_t *valids;
-static struct ioff_s live;
+static struct tili_s stor;
+static struct foff_s live;
 
 #define FACT_NOT_FOUND		((size_t)-1)
 #define FACT_NOT_FOUND_P(x)	(!~(size_t)(x))
@@ -128,7 +134,7 @@ xzfalloc(void *restrict p_old, size_t n_old, size_t n_new, size_t z_memb)
 
 
 static size_t
-_get_ioff(struct ioff_s v, mut_oid_t fact)
+_get_foff(struct foff_s v, mut_oid_t fact)
 {
 	size_t i_fr = FACT_NOT_FOUND;
 	size_t i;
@@ -150,11 +156,11 @@ _get_ioff(struct ioff_s v, mut_oid_t fact)
 }
 
 static int
-_put_ioff(struct ioff_s *tgt, mut_oid_t fact, size_t last)
+_put_foff(struct foff_s *tgt, mut_oid_t fact, size_t last)
 {
 	size_t i;
 
-	i = _get_ioff(*tgt, fact);
+	i = _get_foff(*tgt, fact);
 	if (!FACT_NOT_FOUND_P(i) && tgt->facts[i] != MUT_NUL_OID) {
 		/* just update him then */
 		goto up_and_out;
@@ -182,13 +188,38 @@ up_and_out:
 }
 
 
+/* store handling */
+static __attribute__((nonnull(1))) int
+tili_resize(struct tili_s *restrict s, size_t nadd)
+{
+/* resize to NADD additional slots */
+	const size_t zol = s->ntrans;
+	const size_t znu = zol + nadd;
+	void *nu_t, *nu_i, *nu_v;
+
+	nu_t = xzfalloc(s->trans, zol, znu, sizeof(*s->trans));
+	nu_i = xzfalloc(s->facts, zol, znu, sizeof(*s->facts));
+	nu_v = xzfalloc(s->valids, zol, znu, sizeof(*s->valids));
+
+	if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
+		/* try proper munmapping? */
+		return -1;
+	}
+	/* otherwise reassign */
+	s->trans = nu_t;
+	s->facts = nu_i;
+	s->valids = nu_v;
+	return 0;
+}
+
+
 /* meta */
 static echs_bitmp_t
 _bitte_get_as_of_now(mut_oid_t fact)
 {
 	size_t i;
 
-	i = _get_ioff(live, fact);
+	i = _get_foff(live, fact);
 	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
@@ -196,8 +227,8 @@ _bitte_get_as_of_now(mut_oid_t fact)
 	/* yay, dead or alive, it's in our books */
 	i = live.offs[i];
 	return (echs_bitmp_t){
-		valids[i],
-		(echs_range_t){trans[i], ECHS_UNTIL_CHANGED}
+		stor.valids[i],
+		(echs_range_t){stor.trans[i], ECHS_UNTIL_CHANGED}
 	};
 }
 
@@ -205,32 +236,18 @@ _bitte_get_as_of_now(mut_oid_t fact)
 int
 bitte_put(mut_oid_t fact, echs_range_t valid)
 {
-	if (UNLIKELY(!(ntrans % NTPB))) {
-		const size_t znu = ntrans + NTPB;
-		void *nu_t, *nu_i, *nu_v;
-
-		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
-		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
-
-		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
-			/* try proper munmapping? */
-			return -1;
-		}
-		/* otherwise reassign */
-		trans = nu_t;
-		facts = nu_i;
-		valids = nu_v;
+	if (UNLIKELY(!(stor.ntrans % NTPB) && tili_resize(&stor, NTPB) < 0)) {
+		return -1;
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
-		const size_t it = ntrans++;
+		const size_t it = stor.ntrans++;
 
-		trans[it] = t;
-		facts[it] = fact;
-		valids[it] = valid;
+		stor.trans[it] = t;
+		stor.facts[it] = fact;
+		stor.valids[it] = valid;
 
-		_put_ioff(&live, fact, it);
+		_put_foff(&live, fact, it);
 	}
 	return 0;
 }
@@ -238,43 +255,29 @@ bitte_put(mut_oid_t fact, echs_range_t valid)
 int
 bitte_rem(mut_oid_t fact)
 {
-	const size_t i = _get_ioff(live, fact);
+	const size_t i = _get_foff(live, fact);
 
 	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
 		/* he's dead already */
 		return -1;
-	} else if (echs_nul_range_p(valids[live.offs[i]])) {
+	} else if (echs_nul_range_p(stor.valids[live.offs[i]])) {
 		/* dead already, just */
 		return -1;
 	}
 
 	/* otherwise kill him */
-	if (UNLIKELY(!(ntrans % NTPB))) {
-		const size_t znu = ntrans + NTPB;
-		void *nu_t, *nu_i, *nu_v;
-
-		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
-		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
-
-		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
-			/* try proper munmapping? */
-			return -1;
-		}
-		/* otherwise reassign */
-		trans = nu_t;
-		facts = nu_i;
-		valids = nu_v;
+	if (UNLIKELY(!(stor.ntrans % NTPB) && tili_resize(&stor, NTPB) < 0)) {
+		return -1;
 	}
 	/* stamp him off */
 	with (echs_instant_t t = echs_now()) {
-		const size_t it = ntrans++;
+		const size_t it = stor.ntrans++;
 
-		trans[it] = t;
-		facts[it] = fact;
-		valids[it] = echs_nul_range();
+		stor.trans[it] = t;
+		stor.facts[it] = fact;
+		stor.valids[it] = echs_nul_range();
 
-		_put_ioff(&live, fact, it);
+		_put_foff(&live, fact, it);
 	}
 	return 0;
 }
@@ -285,19 +288,20 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 	size_t i_last_before = FACT_NOT_FOUND;
 	size_t i_first_after = FACT_NOT_FOUND;
 
-	if (UNLIKELY(!ntrans)) {
+	if (UNLIKELY(!stor.ntrans)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if (echs_instant_le_p(trans[ntrans - 1U], as_of)) {
+	else if (echs_instant_le_p(stor.trans[stor.ntrans - 1U], as_of)) {
 		return _bitte_get_as_of_now(fact);
 	}
 	/* otherwise proceed to scan */
 	with (size_t i = 0U) {
-		for (; i < ntrans && echs_instant_le_p(trans[i], as_of); i++) {
-			if (facts[i] == fact) {
+		for (; i < stor.ntrans &&
+			     echs_instant_le_p(stor.trans[i], as_of); i++) {
+			if (stor.facts[i] == fact) {
 				i_last_before = i;
 			}
 		}
@@ -309,8 +313,8 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 		}
 		/* keep scanning, because the fact might have been superseded by
 		 * a more recent transaction */
-		for (; i < ntrans; i++) {
-			if (facts[i] == fact) {
+		for (; i < stor.ntrans; i++) {
+			if (stor.facts[i] == fact) {
 				i_first_after = i;
 				break;
 			}
@@ -320,16 +324,19 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 		if (FACT_NOT_FOUND_P(i_first_after)) {
 			/* must be open-ended */
 			return (echs_bitmp_t){
-				valids[i_last_before],
-				ECHS_RANGE_FROM(trans[i_last_before])
+				stor.valids[i_last_before],
+				ECHS_RANGE_FROM(stor.trans[i_last_before])
 			};
 		}
 	}
 	/* yay, dead or alive, it's in our books */
 	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
-		valids[i_last_before],
-		(echs_range_t){trans[i_last_before], trans[i_first_after]}
+		stor.valids[i_last_before],
+		(echs_range_t){
+			stor.trans[i_last_before],
+			stor.trans[i_first_after]
+		}
 	};
 }
 
@@ -338,61 +345,48 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
 	size_t oi;
 
-	oi = _get_ioff(live, old);
+	oi = _get_foff(live, old);
 	if (FACT_NOT_FOUND_P(oi) || live.facts[oi] == MUT_NUL_OID) {
 		/* must be dead, cannot supersede */
 		return -1;
 	}
 
 	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(!(ntrans % NTPB) ||
-		     /* we won't need another slot if NEW is a NUL. */
-		     new != MUT_NUL_OID && (ntrans % NTPB + 1U == NTPB))) {
-		/* make sure we've got room for 2 insertions
-		 * just ask for one more and kill the lsb */
-		const size_t znu = ((ntrans + NTPB + 1U) >> 1U) << 1U;
-		void *nu_t, *nu_i, *nu_v;
+	if (UNLIKELY(new && !((stor.ntrans + 1U) % NTPB) ||
+		     !(stor.ntrans % NTPB))) {
+		const size_t n = NTPB + (new && !((stor.ntrans + 1U) % NTPB));
 
-		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
-		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
-		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
-
-		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
-			/* try proper munmapping? */
+		if (UNLIKELY(tili_resize(&stor, n) < 0)) {
 			return -1;
 		}
-		/* otherwise reassign */
-		trans = nu_t;
-		facts = nu_i;
-		valids = nu_v;
 	}
 	/* atomically handle the supersedure */
 	with (echs_instant_t t = echs_now()) {
 		/* old guy first */
-		with (const size_t it = ntrans++) {
+		with (const size_t it = stor.ntrans++) {
 			/* build new validity */
 			echs_range_t nuv = {
-				.from = valids[live.offs[oi]].from,
+				.from = stor.valids[live.offs[oi]].from,
 				.till = valid.from,
 			};
 
 			/* bang to timeline */
-			trans[it] = t;
-			facts[it] = old;
-			valids[it] = nuv;
+			stor.trans[it] = t;
+			stor.facts[it] = old;
+			stor.valids[it] = nuv;
 
-			_put_ioff(&live, old, it);
+			_put_foff(&live, old, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
-			const size_t it = ntrans++;
+			const size_t it = stor.ntrans++;
 
 			/* bang to timeline */
-			trans[it] = t;
-			facts[it] = new;
-			valids[it] = valid;
+			stor.trans[it] = t;
+			stor.facts[it] = new;
+			stor.valids[it] = valid;
 
-			_put_ioff(&live, new, it);
+			_put_foff(&live, new, it);
 		}
 	}
 	return 0;
