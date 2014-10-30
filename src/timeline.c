@@ -345,7 +345,9 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 	}
 
 	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(!(ntrans % NTPB) || (ntrans % NTPB + 1U == NTPB))) {
+	if (UNLIKELY(!(ntrans % NTPB) ||
+		     /* we won't need another slot if NEW is a NUL. */
+		     new != MUT_NUL_OID && (ntrans % NTPB + 1U == NTPB))) {
 		/* make sure we've got room for 2 insertions
 		 * just ask for one more and kill the lsb */
 		const size_t znu = ((ntrans + NTPB + 1U) >> 1U) << 1U;
@@ -382,7 +384,9 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 			_put_ioff(&live, old, it);
 		}
 		/* new guy now */
-		with (const size_t it = ntrans++) {
+		if (new != MUT_NUL_OID) {
+			const size_t it = ntrans++;
+
 			/* bang to timeline */
 			trans[it] = t;
 			facts[it] = new;
