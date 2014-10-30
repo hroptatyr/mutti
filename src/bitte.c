@@ -158,7 +158,7 @@ bitte_get(mut_oid_t item, echs_instant_t as_of)
 }
 
 int
-bitte_add(mut_oid_t item, echs_range_t valid)
+bitte_put(mut_oid_t item, echs_range_t valid)
 {
 	/* check if we've got ITEM already */
 	size_t i = _get_item(item);

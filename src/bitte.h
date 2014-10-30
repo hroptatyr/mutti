@@ -65,8 +65,8 @@ extern echs_range_t bitte_trans(mut_oid_t item, echs_instant_t as_of);
 extern echs_bitmp_t bitte_get(mut_oid_t item, echs_instant_t as_of);
 
 /**
- * Add ITEM with valid time VALID. */
-extern int bitte_add(mut_oid_t item, echs_range_t valid);
+ * Put ITEM with valid time VALID. */
+extern int bitte_put(mut_oid_t item, echs_range_t valid);
 
 /**
  * Remove ITEM. */

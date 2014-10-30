@@ -150,7 +150,7 @@ _get_ioff(struct ioff_s v, mut_oid_t item)
 }
 
 static int
-_add_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
+_put_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
 {
 	size_t i;
 
@@ -203,7 +203,7 @@ _bitte_get_as_of_now(mut_oid_t item)
 
 
 int
-bitte_add(mut_oid_t item, echs_range_t valid)
+bitte_put(mut_oid_t item, echs_range_t valid)
 {
 	if (UNLIKELY(!(ntrans % NTPB))) {
 		const size_t znu = ntrans + NTPB;
@@ -230,7 +230,7 @@ bitte_add(mut_oid_t item, echs_range_t valid)
 		items[it] = item;
 		valids[it] = valid;
 
-		_add_ioff(&live, item, it);
+		_put_ioff(&live, item, it);
 	}
 	return 0;
 }
@@ -274,7 +274,7 @@ bitte_rem(mut_oid_t item)
 		items[it] = item;
 		valids[it] = echs_nul_range();
 
-		_add_ioff(&live, item, it);
+		_put_ioff(&live, item, it);
 	}
 	return 0;
 }
