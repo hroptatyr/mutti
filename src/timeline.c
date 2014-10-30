@@ -160,9 +160,9 @@ _add_ioff(struct ioff_s *tgt, mut_oid_t item, size_t last)
 		goto up_and_out;
 	}
 	/* we'll have to extend the list of live items */
-	if (UNLIKELY((tgt->nitems % 512U) == 0U)) {
+	if (UNLIKELY((tgt->nitems % NTPB) == 0U)) {
 		const size_t ol = tgt->nitems;
-		const size_t nu = ol + 512U;
+		const size_t nu = ol + NTPB;
 		void *pi = xzfalloc(tgt->items, ol, nu, sizeof(*tgt->items));
 		void *po = xzfalloc(tgt->offs, ol, nu, sizeof(*tgt->offs));
 
