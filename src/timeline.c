@@ -333,6 +333,68 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 	};
 }
 
+int
+bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
+{
+	size_t oi;
+
+	oi = _get_ioff(live, old);
+	if (FACT_NOT_FOUND_P(oi) || live.facts[oi] == MUT_NUL_OID) {
+		/* must be dead, cannot supersede */
+		return -1;
+	}
+
+	/* otherwise make room for some (i.e. 2) insertions */
+	if (UNLIKELY(!(ntrans % NTPB) || (ntrans % NTPB + 1U == NTPB))) {
+		/* make sure we've got room for 2 insertions
+		 * just ask for one more and kill the lsb */
+		const size_t znu = ((ntrans + NTPB + 1U) >> 1U) << 1U;
+		void *nu_t, *nu_i, *nu_v;
+
+		nu_t = xzfalloc(trans, ntrans, znu, sizeof(*trans));
+		nu_i = xzfalloc(facts, ntrans, znu, sizeof(*facts));
+		nu_v = xzfalloc(valids, ntrans, znu, sizeof(*valids));
+
+		if (UNLIKELY(nu_t == NULL || nu_i == NULL || nu_v == NULL)) {
+			/* try proper munmapping? */
+			return -1;
+		}
+		/* otherwise reassign */
+		trans = nu_t;
+		facts = nu_i;
+		valids = nu_v;
+	}
+	/* atomically handle the supersedure */
+	with (echs_instant_t t = echs_now()) {
+		/* old guy first */
+		with (const size_t it = ntrans++) {
+			/* build new validity */
+			echs_range_t nuv = {
+				.from = valids[live.offs[oi]].from,
+				.till = valid.from,
+			};
+
+			/* bang to timeline */
+			trans[it] = t;
+			facts[it] = old;
+			valids[it] = nuv;
+
+			_put_ioff(&live, old, it);
+		}
+		/* new guy now */
+		with (const size_t it = ntrans++) {
+			/* bang to timeline */
+			trans[it] = t;
+			facts[it] = new;
+			valids[it] = valid;
+
+			_put_ioff(&live, new, it);
+		}
+	}
+	return 0;
+}
+
+
 echs_range_t
 bitte_valid(mut_oid_t fact, echs_instant_t as_of)
 {

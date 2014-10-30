@@ -69,7 +69,17 @@ extern echs_bitmp_t bitte_get(mut_oid_t fact, echs_instant_t as_of);
 extern int bitte_put(mut_oid_t fact, echs_range_t valid);
 
 /**
- * Remove FACT. */
+ * Supersede FACT1 with FACT2 and new validity VALID.
+ * The current validity of FACT1 is extended/restricted to the
+ * beginning of VALID.  For all modifications the same transaction
+ * time is used. */
+extern int
+bitte_supersede(mut_oid_t old_fact, mut_oid_t new_fact, echs_range_t valid);
+
+/**
+ * Remove FACT.
+ * This is equivalent to
+ *   bitte_supersede(FACT, MUT_NUL_OID, ECHS_NUL_RANGE); */
 extern int bitte_rem(mut_oid_t fact);
 
 #endif	/* INCLUDED_bitte_h_ */
