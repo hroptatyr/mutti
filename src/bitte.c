@@ -395,17 +395,4 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 	return 0;
 }
 
-
-echs_range_t
-bitte_valid(mut_oid_t fact, echs_instant_t as_of)
-{
-	return bitte_get(fact, as_of).valid;
-}
-
-echs_range_t
-bitte_trans(mut_oid_t fact, echs_instant_t as_of)
-{
-	return bitte_get(fact, as_of).trans;
-}
-
 /* bitte.c ends here */

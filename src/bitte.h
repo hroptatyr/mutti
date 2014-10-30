@@ -53,14 +53,6 @@ typedef struct {
 
 
 /**
- * Return the valid time of FACT (as of AS_OF). */
-extern echs_range_t bitte_valid(mut_oid_t fact, echs_instant_t as_of);
-
-/**
- * Return the transaction time of FACT (as of AS_OF). */
-extern echs_range_t bitte_trans(mut_oid_t fact, echs_instant_t as_of);
-
-/**
  * Return the full bitemporal stamp of FACT (as of AS_OF). */
 extern echs_bitmp_t bitte_get(mut_oid_t fact, echs_instant_t as_of);
 
