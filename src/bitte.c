@@ -236,8 +236,12 @@ _bitte_get_as_of_now(mut_oid_t fact)
 int
 bitte_put(mut_oid_t fact, echs_range_t valid)
 {
-	if (UNLIKELY(!(stor.ntrans % NTPB) && tili_resize(&stor, NTPB) < 0)) {
+	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		return -1;
+	} else if (UNLIKELY(!(stor.ntrans % NTPB))) {
+		if (UNLIKELY(tili_resize(&stor, NTPB) < 0)) {
+			return -1;
+		}
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
@@ -288,7 +292,7 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 	size_t i_last_before = FACT_NOT_FOUND;
 	size_t i_first_after = FACT_NOT_FOUND;
 
-	if (UNLIKELY(!stor.ntrans)) {
+	if (UNLIKELY(!stor.ntrans || fact == MUT_NUL_OID)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
@@ -343,9 +347,8 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 int
 bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	size_t oi;
+	const size_t oi = _get_foff(live, old);
 
-	oi = _get_foff(live, old);
 	if (FACT_NOT_FOUND_P(oi) || live.facts[oi] == MUT_NUL_OID) {
 		/* must be dead, cannot supersede */
 		return -1;
