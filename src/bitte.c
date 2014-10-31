@@ -305,7 +305,7 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 	/* cache index */
 	size_t ci;
 	/* timeline index (aka offset) */
-	size_t ti;
+	size_t ti = 0U;
 
 	/* try caches */
 	for (ci = 0U; ci < ncache; ci++) {
@@ -333,7 +333,6 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 		assert(ci == ncache);
 
 		ncache++;
-		ti = 0U;
 	} else {
 		/* grml, looks like we have to bin a cache item */
 		return 0U;
