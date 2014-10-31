@@ -66,6 +66,7 @@ struct tili_s {
 /* fact offsets into the timeline */
 struct foff_s {
 	size_t nfacts;
+	echs_instant_t trans;
 	mut_oid_t *facts;
 	size_t *offs;
 };
@@ -158,7 +159,7 @@ _get_foff(struct foff_s *v, mut_oid_t fact)
 }
 
 static int
-_put_foff(struct foff_s *tgt, mut_oid_t fact, size_t last)
+_put_foff(struct foff_s *tgt, mut_oid_t fact, echs_instant_t t, size_t last)
 {
 	size_t i;
 
@@ -185,6 +186,7 @@ _put_foff(struct foff_s *tgt, mut_oid_t fact, size_t last)
 	i = tgt->nfacts++;
 	tgt->facts[i] = fact;
 up_and_out:
+	tgt->trans = t;
 	tgt->offs[i] = last;
 	return 0;
 }
@@ -319,7 +321,7 @@ bitte_put(mut_oid_t fact, echs_range_t valid)
 		stor.facts[it] = fact;
 		stor.valids[it] = valid;
 
-		_put_foff(&live, fact, it);
+		_put_foff(&live, fact, t, it);
 	}
 	return 0;
 }
@@ -349,7 +351,7 @@ bitte_rem(mut_oid_t fact)
 		stor.facts[it] = fact;
 		stor.valids[it] = echs_nul_range();
 
-		_put_foff(&live, fact, it);
+		_put_foff(&live, fact, t, it);
 	}
 	return 0;
 }
@@ -404,7 +406,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 			stor.facts[it] = old;
 			stor.valids[it] = nuv;
 
-			_put_foff(&live, old, it);
+			_put_foff(&live, old, t, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
@@ -415,7 +417,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 			stor.facts[it] = new;
 			stor.valids[it] = valid;
 
-			_put_foff(&live, new, it);
+			_put_foff(&live, new, t, it);
 		}
 	}
 	return 0;
