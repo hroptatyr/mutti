@@ -132,6 +132,17 @@ xzfalloc(void *restrict p_old, size_t n_old, size_t n_new, size_t z_memb)
 	return xfalloc(p_old, n_old * z_memb, n_new * z_memb);
 }
 
+#define min(T, x, y)		min_##T(x, y)
+#define DEFMIN(T)				\
+static inline __attribute__((pure, const)) T	\
+min_##T(T x, T y)				\
+{						\
+	return x <= y ? x : y;			\
+}						\
+struct __##T##_defined_s
+
+DEFMIN(size_t);
+
 
 static size_t
 _get_foff(struct foff_s v, mut_oid_t fact)
