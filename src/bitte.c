@@ -417,7 +417,7 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if (echs_instant_le_p(stor.trans[stor.ntrans - 1U], as_of)) {
+	else if (echs_instant_le_p(live.trans, as_of)) {
 		return _bitte_get_as_of_now(fact);
 	}
 	/* otherwise proceed to scan */
@@ -484,7 +484,6 @@ bitte_rtr(
 {
 /* we'll abuse the FACT array to store our offsets first,
  * then we'll copy the actual fact oids and valids and transs */
-#define LAST_TRANS	(stor.trans[stor.ntrans - 1U])
 	bool currentp;
 	size_t res;
 
@@ -494,7 +493,7 @@ bitte_rtr(
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if ((currentp = echs_instant_le_p(LAST_TRANS, as_of))) {
+	else if ((currentp = echs_instant_le_p(live.trans, as_of))) {
 		res = _bitte_rtr_as_of_now(fact, nfact);
 	}
 	/* otherwise just do it the hard way */
