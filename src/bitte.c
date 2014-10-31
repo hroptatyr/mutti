@@ -243,6 +243,24 @@ _bitte_get_as_of_now(mut_oid_t fact)
 	};
 }
 
+static size_t
+_bitte_rtr_as_of_now(mut_oid_t *restrict fact, size_t nfact)
+{
+/* current transaction time-slice, very naive */
+	const size_t n = min(size_t, nfact, live.nfacts);
+
+	for (size_t i = 0U; i < n; i++) {
+		fact[i] = (mut_oid_t)live.offs[i];
+	}
+	return n;
+}
+
+static size_t
+_bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
+{
+	return 0U;
+}
+
 
 int
 bitte_put(mut_oid_t fact, echs_range_t valid)
@@ -404,6 +422,55 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 		}
 	}
 	return 0;
+}
+
+/* hardest one so far */
+size_t
+bitte_rtr(
+	mut_oid_t *restrict fact, size_t nfact,
+	echs_range_t *restrict valid, echs_range_t *restrict trans,
+	echs_instant_t as_of)
+{
+/* we'll abuse the FACT array to store our offsets first,
+ * then we'll copy the actual fact oids and valids and transs */
+#define LAST_TRANS	(stor.trans[stor.ntrans - 1U])
+	bool currentp;
+	size_t res;
+
+	if (UNLIKELY(!stor.ntrans)) {
+		/* no transactions in this store, trivial*/
+		return 0U;
+	}
+	/* if AS_OF is >= the stamp of the last transaction, just use
+	 * the live table. */
+	else if ((currentp = echs_instant_le_p(LAST_TRANS, as_of))) {
+		res = _bitte_rtr_as_of_now(fact, nfact);
+	}
+	/* otherwise just do it the hard way */
+	else {
+		res = _bitte_rtr(fact, nfact, as_of);
+	}
+
+	/* now we've got them offsets,
+	 * reiterate and assemble the arrays */
+	if (trans != NULL && currentp) {
+		for (size_t i = 0U; i < res; i++) {
+			trans[i] = ECHS_RANGE_FROM(stor.trans[i]);
+		}
+	} else if (trans != NULL) {
+		/* cluster fuck? */
+		memset(trans, 0, res * sizeof(*trans));
+	}
+	if (valid != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			valid[i] = stor.valids[i];
+		}
+	}
+	/* ... and finally */
+	for (size_t i = 0U; i < res; i++) {
+		fact[i] = stor.facts[fact[i]];
+	}
+	return res;
 }
 
 /* bitte.c ends here */
