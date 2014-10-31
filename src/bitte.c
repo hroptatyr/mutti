@@ -234,6 +234,54 @@ _bitte_get_as_of_now(mut_oid_t fact)
 	};
 }
 
+static echs_bitmp_t
+_bitte_get(mut_oid_t fact, echs_instant_t as_of)
+{
+	size_t i_last_before = FACT_NOT_FOUND;
+	size_t i_first_after = FACT_NOT_FOUND;
+	size_t i = 0U;
+
+	for (; i < stor.ntrans &&
+		     echs_instant_le_p(stor.trans[i], as_of); i++) {
+		if (stor.facts[i] == fact) {
+			i_last_before = i;
+		}
+	}
+	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
+	 * the last fiddle with FACT before AS_OF */
+	if (FACT_NOT_FOUND_P(i_last_before)) {
+		/* must be dead */
+		return ECHS_NUL_BITMP;
+	}
+	/* keep scanning, because the fact might have been superseded by
+	 * a more recent transaction */
+	for (; i < stor.ntrans; i++) {
+		if (stor.facts[i] == fact) {
+			i_first_after = i;
+			break;
+		}
+	}
+	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
+	 * the next fiddle with FACT on or after AS_OF */
+	if (FACT_NOT_FOUND_P(i_first_after)) {
+		/* must be open-ended */
+		return (echs_bitmp_t){
+			stor.valids[i_last_before],
+				ECHS_RANGE_FROM(stor.trans[i_last_before])
+				};
+	}
+
+	/* yay, dead or alive, it's in our books */
+	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
+	return (echs_bitmp_t){
+		stor.valids[i_last_before],
+		(echs_range_t){
+			stor.trans[i_last_before],
+			stor.trans[i_first_after]
+		}
+	};
+}
+
 static size_t
 _bitte_rtr_as_of_now(mut_oid_t *restrict fact, size_t nfact)
 {
@@ -309,9 +357,6 @@ bitte_rem(mut_oid_t fact)
 echs_bitmp_t
 bitte_get(mut_oid_t fact, echs_instant_t as_of)
 {
-	size_t i_last_before = FACT_NOT_FOUND;
-	size_t i_first_after = FACT_NOT_FOUND;
-
 	if (UNLIKELY(!stor.ntrans || fact == MUT_NUL_OID)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
@@ -322,46 +367,7 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 		return _bitte_get_as_of_now(fact);
 	}
 	/* otherwise proceed to scan */
-	with (size_t i = 0U) {
-		for (; i < stor.ntrans &&
-			     echs_instant_le_p(stor.trans[i], as_of); i++) {
-			if (stor.facts[i] == fact) {
-				i_last_before = i;
-			}
-		}
-		/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
-		 * the last fiddle with FACT before AS_OF */
-		if (FACT_NOT_FOUND_P(i_last_before)) {
-			/* must be dead */
-			return ECHS_NUL_BITMP;
-		}
-		/* keep scanning, because the fact might have been superseded by
-		 * a more recent transaction */
-		for (; i < stor.ntrans; i++) {
-			if (stor.facts[i] == fact) {
-				i_first_after = i;
-				break;
-			}
-		}
-		/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
-		 * the next fiddle with FACT on or after AS_OF */
-		if (FACT_NOT_FOUND_P(i_first_after)) {
-			/* must be open-ended */
-			return (echs_bitmp_t){
-				stor.valids[i_last_before],
-				ECHS_RANGE_FROM(stor.trans[i_last_before])
-			};
-		}
-	}
-	/* yay, dead or alive, it's in our books */
-	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
-	return (echs_bitmp_t){
-		stor.valids[i_last_before],
-		(echs_range_t){
-			stor.trans[i_last_before],
-			stor.trans[i_first_after]
-		}
-	};
+	return _bitte_get(fact, as_of);
 }
 
 int
