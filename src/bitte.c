@@ -148,17 +148,8 @@ static size_t
 _get_foff(struct foff_s v, mut_oid_t fact)
 {
 	size_t i_fr = FACT_NOT_FOUND;
-	size_t i;
 
-	for (i = 0U; i < v.nfacts; i++) {
-		if (v.facts[i] == MUT_NUL_OID) {
-			i_fr = i;
-			break;
-		} else if (v.facts[i] == fact) {
-			return i;
-		}
-	}
-	for (; i < v.nfacts; i++) {
+	for (size_t i = 0U; i < v.nfacts; i++) {
 		if (v.facts[i] == fact) {
 			return i;
 		}
@@ -172,7 +163,7 @@ _put_foff(struct foff_s *tgt, mut_oid_t fact, size_t last)
 	size_t i;
 
 	i = _get_foff(*tgt, fact);
-	if (!FACT_NOT_FOUND_P(i) && tgt->facts[i] != MUT_NUL_OID) {
+	if (!FACT_NOT_FOUND_P(i)) {
 		/* just update him then */
 		goto up_and_out;
 	}
@@ -231,7 +222,7 @@ _bitte_get_as_of_now(mut_oid_t fact)
 	size_t i;
 
 	i = _get_foff(live, fact);
-	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -290,7 +281,7 @@ bitte_rem(mut_oid_t fact)
 {
 	const size_t i = _get_foff(live, fact);
 
-	if (FACT_NOT_FOUND_P(i) || live.facts[i] == MUT_NUL_OID) {
+	if (FACT_NOT_FOUND_P(i)) {
 		/* he's dead already */
 		return -1;
 	} else if (echs_nul_range_p(stor.valids[live.offs[i]])) {
@@ -378,7 +369,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
 	const size_t oi = _get_foff(live, old);
 
-	if (FACT_NOT_FOUND_P(oi) || live.facts[oi] == MUT_NUL_OID) {
+	if (FACT_NOT_FOUND_P(oi)) {
 		/* must be dead, cannot supersede */
 		return -1;
 	}
