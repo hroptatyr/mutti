@@ -39,6 +39,7 @@
 #endif	/* HAVE_CONFIG_H */
 #include <sys/mman.h>
 #include <string.h>
+#include <assert.h>
 #include "bitte.h"
 #include "nifty.h"
 
@@ -73,6 +74,8 @@ struct foff_s {
 
 static struct tili_s stor;
 static struct foff_s live;
+static struct foff_s cache[64U];
+static size_t ncache;
 
 #define FACT_NOT_FOUND		((size_t)-1)
 #define FACT_NOT_FOUND_P(x)	(!~(size_t)(x))
@@ -299,7 +302,56 @@ _bitte_rtr_as_of_now(mut_oid_t *restrict fact, size_t nfact)
 static size_t
 _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 {
-	return 0U;
+	/* cache index */
+	size_t ci;
+	/* timeline index (aka offset) */
+	size_t ti;
+
+	/* try caches */
+	for (ci = 0U; ci < ncache; ci++) {
+		if (!echs_instant_lt_p(as_of, cache[ci].trans)) {
+			/* found one */
+			break;
+		}
+	}
+	if (ci < ncache) {
+		/* yay, found a cache we can evolve,
+		 * find highest offset into trans so we know where to
+		 * start scanning */
+		for (size_t i = 0U; i < cache[ci].nfacts; i++) {
+			if (cache[ci].offs[i] > ti) {
+				ti = cache[ci].offs[i];
+			}
+		}
+		/* we can start a bit later since the TI-th offset is covered */
+		ti++;
+	} else if (LIKELY(ncache < countof(cache))) {
+		/* have to start a new cache object, we're guaranteed
+		 * that we can insert at the back because the cache is
+		 * sorted in reverse chronological order */
+		assert(live.nfacts);
+		assert(ci == ncache);
+
+		ncache++;
+		ti = 0U;
+	} else {
+		/* grml, looks like we have to bin a cache item */
+		return 0U;
+	}
+	/* now start materialising the cache */
+	for (echs_instant_t t;
+	     ti < stor.ntrans &&
+		     (t = stor.trans[ti], echs_instant_le_p(t, as_of)); ti++) {
+		_put_foff(cache + ci, stor.facts[ti], t, ti);
+	}
+
+	/* same as _bitte_rtr_as_of_now() now */
+	const size_t n = min(size_t, nfact, cache[ci].nfacts);
+
+	for (size_t i = 0U; i < n; i++) {
+		fact[i] = (mut_oid_t)cache[ci].offs[i];
+	}
+	return n;
 }
 
 
