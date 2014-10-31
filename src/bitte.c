@@ -446,7 +446,8 @@ bitte_rtr(
 	 * reiterate and assemble the arrays */
 	if (trans != NULL && currentp) {
 		for (size_t i = 0U; i < res; i++) {
-			trans[i] = ECHS_RANGE_FROM(stor.trans[i]);
+			const size_t o = fact[i];
+			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
 		}
 	} else if (trans != NULL) {
 		/* cluster fuck? */
@@ -454,12 +455,14 @@ bitte_rtr(
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
-			valid[i] = stor.valids[i];
+			const size_t o = fact[i];
+			valid[i] = stor.valids[o];
 		}
 	}
 	/* ... and finally */
 	for (size_t i = 0U; i < res; i++) {
-		fact[i] = stor.facts[fact[i]];
+		const size_t o = fact[i];
+		fact[i] = stor.facts[o];
 	}
 	return res;
 }
