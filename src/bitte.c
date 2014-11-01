@@ -353,6 +353,34 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 	return n;
 }
 
+static void
+_bitte_rtr_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
+{
+/* TRansaction ENDs, obtain offsets in OF find the transaction time range */
+	size_t hi = 0U;
+	for (size_t i = 0U; i < nof; i++) {
+		if (of[i] > hi) {
+			hi = of[i];
+		}
+	}
+	hi++;
+	for (size_t i = 0U; i < nof; i++) {
+		const size_t o = of[i];
+		const mut_oid_t f = stor.facts[o];
+
+		/* the lower bound is easy */
+		trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
+		/* find the upper bound if any */
+		for (size_t j = hi; j < stor.ntrans; j++) {
+			if (stor.facts[j] == f) {
+				trans[i].till = stor.trans[j];
+				break;
+			}
+		}
+	}
+	return;
+}
+
 
 int
 bitte_put(mut_oid_t fact, echs_range_t valid)
@@ -509,26 +537,10 @@ bitte_rtr(
 		}
 	} else if (trans != NULL) {
 		/* cluster fuck, how do we know when trans[o] ends?
-		 * well we scan for the smallest offset referred to
-		 * in LIVE so by definition offsets >= this smallest
-		 * one must be in live too (chronology), those will
-		 * be until-changed (i.e. live), offsets less than
-		 * that smallest one are simply bounded by AS_OF
-		 * until we come up with a better idea */
-		size_t small = stor.ntrans;
-		for (size_t i = 0U; i < live.nfacts; i++) {
-			if (live.offs[i] < small) {
-				small = live.offs[i];
-			}
-		}
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = fact[i];
-			if (o >= small) {
-				trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
-			} else {
-				trans[i] = (echs_range_t){stor.trans[o], as_of};
-			}
-		}
+		 * well, we scan again for any of the offsets in
+		 * FACT and find the next transaction and put it into
+		 * TRANS. */
+		_bitte_rtr_trend(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
