@@ -46,4 +46,8 @@ check_PROGRAMS += rtr_01
 rtr_01_LDADD = $(mutti_LIBS)
 cli_tests += rtr_01.clit
 
+check_PROGRAMS += rtr_02
+rtr_02_LDADD = $(mutti_LIBS)
+cli_tests += rtr_02.clit
+
 ## Makefile.am ends here
