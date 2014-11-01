@@ -357,21 +357,23 @@ static void
 _bitte_rtr_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
-	size_t hi = 0U;
-	for (size_t i = 0U; i < nof; i++) {
-		if (of[i] > hi) {
-			hi = of[i];
-		}
-	}
-	hi++;
+	/* try and lookup each of the facts in the live blob */
 	for (size_t i = 0U; i < nof; i++) {
 		const size_t o = of[i];
 		const mut_oid_t f = stor.facts[o];
+		const size_t hi = _get_foff(&live, f);
+		const size_t ohi = live.offs[hi];
 
-		/* the lower bound is easy */
-		trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
-		/* find the upper bound if any */
-		for (size_t j = hi; j < stor.ntrans; j++) {
+		assert(!FACT_NOT_FOUND_P(hi));
+		if (ohi == o) {
+			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
+			continue;
+		}
+		assert(o < ohi);
+		/* best known upper bound is the one in the live blob */
+		trans[i] = (echs_range_t){stor.trans[o], stor.trans[ohi]};
+		/* and now scan the timeline between O and HI */
+		for (size_t j = o + 1U; j < ohi; j++) {
 			if (stor.facts[j] == f) {
 				trans[i].till = stor.trans[j];
 				break;
