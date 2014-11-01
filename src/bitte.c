@@ -508,8 +508,27 @@ bitte_rtr(
 			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
 		}
 	} else if (trans != NULL) {
-		/* cluster fuck? */
-		memset(trans, 0, res * sizeof(*trans));
+		/* cluster fuck, how do we know when trans[o] ends?
+		 * well we scan for the smallest offset referred to
+		 * in LIVE so by definition offsets >= this smallest
+		 * one must be in live too (chronology), those will
+		 * be until-changed (i.e. live), offsets less than
+		 * that smallest one are simply bounded by AS_OF
+		 * until we come up with a better idea */
+		size_t small = stor.ntrans;
+		for (size_t i = 0U; i < live.nfacts; i++) {
+			if (live.offs[i] < small) {
+				small = live.offs[i];
+			}
+		}
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = fact[i];
+			if (o >= small) {
+				trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
+			} else {
+				trans[i] = (echs_range_t){stor.trans[o], as_of};
+			}
+		}
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
