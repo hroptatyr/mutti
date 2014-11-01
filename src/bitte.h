@@ -53,14 +53,6 @@ typedef struct {
 
 
 /**
- * Return the valid time of FACT (as of AS_OF). */
-extern echs_range_t bitte_valid(mut_oid_t fact, echs_instant_t as_of);
-
-/**
- * Return the transaction time of FACT (as of AS_OF). */
-extern echs_range_t bitte_trans(mut_oid_t fact, echs_instant_t as_of);
-
-/**
  * Return the full bitemporal stamp of FACT (as of AS_OF). */
 extern echs_bitmp_t bitte_get(mut_oid_t fact, echs_instant_t as_of);
 
@@ -81,5 +73,18 @@ bitte_supersede(mut_oid_t old_fact, mut_oid_t new_fact, echs_range_t valid);
  * This is equivalent to
  *   bitte_supersede(FACT, MUT_NUL_OID, ECHS_NUL_RANGE); */
 extern int bitte_rem(mut_oid_t fact);
+
+/**
+ * Retrieve all known FACTS as of AS_OF.
+ * At most NFACT facts will be put into the FACT array.
+ * Put validity times into VALID array if non-NULL.
+ * Put transaction times into TRANS array if non-NULL.
+ * VALID and/or TRANS in that case should have at least NFACT slots.
+ * Return the number of facts retrievable. */
+extern size_t
+bitte_rtr(
+	mut_oid_t *restrict fact, size_t nfact,
+	echs_range_t *restrict valid, echs_range_t *restrict trans,
+	echs_instant_t as_of);
 
 #endif	/* INCLUDED_bitte_h_ */

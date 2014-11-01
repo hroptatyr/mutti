@@ -10,8 +10,6 @@ AM_CFLAGS = $(EXTRA_CFLAGS)
 AM_CPPFLAGS = -D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE=600 -D_BSD_SOURCE
 AM_CPPFLAGS += -DTEST
 AM_CPPFLAGS += $(mutti_CFLAGS)
-AM_LDFLAGS =
-AM_LDFLAGS += $(mutti_LIBS)
 
 EXTRA_DIST = $(BUILT_SOURCES) $(TESTS)
 TESTS =
@@ -41,7 +39,15 @@ addgetrem_02_LDADD = $(mutti_LIBS)
 cli_tests += addgetrem_02.clit
 
 check_PROGRAMS += addgetrem_03
-addgetrem_02_LDADD = $(mutti_LIBS)
+addgetrem_03_LDADD = $(mutti_LIBS)
 cli_tests += addgetrem_03.clit
+
+check_PROGRAMS += rtr_01
+rtr_01_LDADD = $(mutti_LIBS)
+cli_tests += rtr_01.clit
+
+check_PROGRAMS += rtr_02
+rtr_02_LDADD = $(mutti_LIBS)
+cli_tests += rtr_02.clit
 
 ## Makefile.am ends here
