@@ -91,4 +91,41 @@ echs_eternal_range_p(echs_range_t r)
 	return (r.till.u - r.from.u) == -1ULL;
 }
 
+/* simple interval relations, interval x instant */
+static inline __attribute__((pure, const)) bool
+echs_in_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_instant_le_p(r.from, t) && echs_instant_lt_p(t, r.till);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_begins_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_instant_eq_p(r.from, t);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_ends_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_instant_eq_p(r.till, t);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_meets_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_begins_range_p(r, t) || echs_ends_range_p(r, t);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_before_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_instant_lt_p(t, r.from);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_after_range_p(echs_range_t r, echs_instant_t t)
+{
+	return echs_instant_le_p(r.till, t);
+}
+
 #endif	/* INCLUDED_range_h_ */
