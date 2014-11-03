@@ -75,7 +75,7 @@ bitte_supersede(mut_oid_t old_fact, mut_oid_t new_fact, echs_range_t valid);
 extern int bitte_rem(mut_oid_t fact);
 
 /**
- * Retrieve all known FACTS as of AS_OF.
+ * Retrieve all known FACTS as of AS_OF (known as transaction time slice).
  * At most NFACT facts will be put into the FACT array.
  * Put validity times into VALID array if non-NULL.
  * Put transaction times into TRANS array if non-NULL.
