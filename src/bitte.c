@@ -558,4 +558,39 @@ bitte_rtr(
 	return res;
 }
 
+size_t
+bitte_scan(
+	mut_oid_t *restrict fact, size_t nfact,
+	echs_range_t *restrict valid, echs_range_t *restrict trans,
+	echs_instant_t vtime)
+{
+	size_t res = 0U;
+
+	/* store offsets in FACT table first */
+	for (size_t i = 0U; i < stor.ntrans && res < nfact; i++) {
+		if (echs_in_range_p(stor.valids[i], vtime)) {
+			fact[res++] = i;
+		}
+	}
+	/* go through FACT table and bang real objects */
+	if (trans != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = fact[i];
+			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
+		}
+	}
+	if (valid != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = fact[i];
+			valid[i] = stor.valids[o];
+		}
+	}
+	/* ... and finally */
+	for (size_t i = 0U; i < res; i++) {
+		const size_t o = fact[i];
+		fact[i] = stor.facts[o];
+	}
+	return res;
+}
+
 /* bitte.c ends here */
