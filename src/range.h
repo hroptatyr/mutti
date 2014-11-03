@@ -128,4 +128,47 @@ echs_after_range_p(echs_range_t r, echs_instant_t t)
 	return echs_instant_le_p(r.till, t);
 }
 
+/* more of those, interval x interval */
+static inline __attribute__((pure, const)) bool
+echs_range_eq_p(echs_range_t r1, echs_range_t r2)
+{
+/* R1 eq R2? */
+	return echs_instant_eq_p(r1.from, r2.from) &&
+		echs_instant_eq_p(r1.till, r2.till);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_range_overlaps_p(echs_range_t r1, echs_range_t r2)
+{
+	return echs_in_range_p(r1, r2.from) || echs_in_range_p(r1, r2.till);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_range_contains_p(echs_range_t r1, echs_range_t r2)
+{
+/* R1 contains R2? */
+	return echs_in_range_p(r1, r2.from) && echs_in_range_p(r1, r2.till);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_range_begins_p(echs_range_t r1, echs_range_t r2)
+{
+/* R1 begins R2? */
+	return echs_begins_range_p(r2, r1.till);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_range_ends_p(echs_range_t r1, echs_range_t r2)
+{
+/* R1 ends R2? */
+	return echs_ends_range_p(r2, r1.from);
+}
+
+static inline __attribute__((pure, const)) bool
+echs_range_meets_p(echs_range_t r1, echs_range_t r2)
+{
+/* R1 meets R2? */
+	return echs_range_begins_p(r1, r2) || echs_range_ends_p(r1, r2);
+}
+
 #endif	/* INCLUDED_range_h_ */
