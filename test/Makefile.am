@@ -54,4 +54,8 @@ check_PROGRAMS += scan_01
 scan_01_LDADD = $(mutti_LIBS)
 cli_tests += scan_01.clit
 
+check_PROGRAMS += hist_01
+hist_01_LDADD = $(mutti_LIBS)
+cli_tests += hist_01.clit
+
 ## Makefile.am ends here
