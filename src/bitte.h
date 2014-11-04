@@ -100,4 +100,14 @@ bitte_scan(
 	echs_range_t *restrict valid, echs_range_t *restrict trans,
 	echs_instant_t vtime);
 
+/**
+ * Retrieve history of FACT.
+ * At most NTRANS transaction time ranges will be put into the TRANS array.
+ * If non-NULL put corresponding valid time ranges into VALID.
+ * Return the number of transactions. */
+extern size_t
+bitte_hist(
+	echs_range_t *restrict trans, size_t ntrans,
+	echs_range_t *restrict valid, mut_oid_t fact);
+
 #endif	/* INCLUDED_bitte_h_ */

@@ -590,4 +590,40 @@ bitte_scan(
 	return res;
 }
 
+size_t
+bitte_hist(
+	echs_range_t *restrict trans, size_t ntrans,
+	echs_range_t *restrict valid, mut_oid_t fact)
+{
+	size_t res = 0U;
+
+	/* traverse the timeline and store offsets to transactions */
+	for (size_t i = 0U; i < stor.ntrans && res < ntrans; i++) {
+		if (stor.facts[i] == fact) {
+			trans[res++].from.u = i;
+		}
+	}
+
+	if (valid != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = trans[i].from.u;
+			valid[i] = stor.valids[o];
+		}
+	}
+
+	/* and lastly write down the real transactions */
+	for (size_t i = 1U; i < res; i++) {
+		const size_t of = trans[i - 1U].from.u;
+		const size_t ot = trans[i].from.u;
+
+		trans[i - 1U] = (echs_range_t){stor.trans[of], stor.trans[ot]};
+	}
+	/* last trans lasts forever */
+	if (res > 0U) {
+		const size_t o = trans[res - 1U].from.u;
+		trans[res - 1U] = ECHS_RANGE_FROM(stor.trans[o]);
+	}
+	return res;
+}
+
 /* bitte.c ends here */
