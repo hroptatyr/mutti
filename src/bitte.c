@@ -574,10 +574,7 @@ bitte_scan(
 	}
 	/* go through FACT table and bang real objects */
 	if (trans != NULL) {
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = fact[i];
-			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
-		}
+		_bitte_rtr_trend(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
