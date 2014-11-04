@@ -354,7 +354,7 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 }
 
 static void
-_bitte_rtr_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
+_bitte_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
 	/* try and lookup each of the facts in the live blob */
@@ -542,7 +542,7 @@ bitte_rtr(
 		 * well, we scan again for any of the offsets in
 		 * FACT and find the next transaction and put it into
 		 * TRANS. */
-		_bitte_rtr_trend(trans, fact, res);
+		_bitte_trend(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
@@ -574,7 +574,7 @@ bitte_scan(
 	}
 	/* go through FACT table and bang real objects */
 	if (trans != NULL) {
-		_bitte_rtr_trend(trans, fact, res);
+		_bitte_trend(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
