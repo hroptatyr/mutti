@@ -354,7 +354,7 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 }
 
 static void
-_bitte_rtr_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
+_bitte_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
 	/* try and lookup each of the facts in the live blob */
@@ -542,7 +542,7 @@ bitte_rtr(
 		 * well, we scan again for any of the offsets in
 		 * FACT and find the next transaction and put it into
 		 * TRANS. */
-		_bitte_rtr_trend(trans, fact, res);
+		_bitte_trend(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
@@ -554,6 +554,74 @@ bitte_rtr(
 	for (size_t i = 0U; i < res; i++) {
 		const size_t o = fact[i];
 		fact[i] = stor.facts[o];
+	}
+	return res;
+}
+
+size_t
+bitte_scan(
+	mut_oid_t *restrict fact, size_t nfact,
+	echs_range_t *restrict valid, echs_range_t *restrict trans,
+	echs_instant_t vtime)
+{
+	size_t res = 0U;
+
+	/* store offsets in FACT table first */
+	for (size_t i = 0U; i < stor.ntrans && res < nfact; i++) {
+		if (echs_in_range_p(stor.valids[i], vtime)) {
+			fact[res++] = i;
+		}
+	}
+	/* go through FACT table and bang real objects */
+	if (trans != NULL) {
+		_bitte_trend(trans, fact, res);
+	}
+	if (valid != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = fact[i];
+			valid[i] = stor.valids[o];
+		}
+	}
+	/* ... and finally */
+	for (size_t i = 0U; i < res; i++) {
+		const size_t o = fact[i];
+		fact[i] = stor.facts[o];
+	}
+	return res;
+}
+
+size_t
+bitte_hist(
+	echs_range_t *restrict trans, size_t ntrans,
+	echs_range_t *restrict valid, mut_oid_t fact)
+{
+	size_t res = 0U;
+
+	/* traverse the timeline and store offsets to transactions */
+	for (size_t i = 0U; i < stor.ntrans && res < ntrans; i++) {
+		if (stor.facts[i] == fact) {
+			trans[res++].from.u = i;
+		}
+	}
+
+	if (valid != NULL) {
+		for (size_t i = 0U; i < res; i++) {
+			const size_t o = trans[i].from.u;
+			valid[i] = stor.valids[o];
+		}
+	}
+
+	/* and lastly write down the real transactions */
+	for (size_t i = 1U; i < res; i++) {
+		const size_t of = trans[i - 1U].from.u;
+		const size_t ot = trans[i].from.u;
+
+		trans[i - 1U] = (echs_range_t){stor.trans[of], stor.trans[ot]};
+	}
+	/* last trans lasts forever */
+	if (res > 0U) {
+		const size_t o = trans[res - 1U].from.u;
+		trans[res - 1U] = ECHS_RANGE_FROM(stor.trans[o]);
 	}
 	return res;
 }
