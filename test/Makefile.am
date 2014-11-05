@@ -50,9 +50,17 @@ check_PROGRAMS += rtr_02
 rtr_02_LDADD = $(mutti_LIBS)
 cli_tests += rtr_02.clit
 
+check_PROGRAMS += rtr_03
+rtr_03_LDADD = $(mutti_LIBS)
+cli_tests += rtr_03.clit
+
 check_PROGRAMS += scan_01
 scan_01_LDADD = $(mutti_LIBS)
 cli_tests += scan_01.clit
+
+check_PROGRAMS += scan_02
+scan_02_LDADD = $(mutti_LIBS)
+cli_tests += scan_02.clit
 
 check_PROGRAMS += hist_01
 hist_01_LDADD = $(mutti_LIBS)
