@@ -37,6 +37,7 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <stdint.h>
 #include <sys/mman.h>
 #include <string.h>
 #include <assert.h>
@@ -55,6 +56,9 @@
 #endif	/* !MAP_ANON */
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
+
+/* a transaction is simply an offset in the STOR SoA */
+typedef uintptr_t mut_trans_t;
 
 /* simple timeline index */
 struct tili_s {
@@ -146,6 +150,25 @@ min_##T(T x, T y)				\
 struct __##T##_defined_s
 
 DEFMIN(size_t);
+
+
+static inline echs_instant_t
+trans_get_trans(mut_trans_t t)
+{
+	return stor.trans[t];
+}
+
+static inline mut_oid_t
+trans_get_fact(mut_trans_t t)
+{
+	return stor.facts[t];
+}
+
+static inline echs_range_t
+trans_get_valid(mut_trans_t t)
+{
+	return stor.valids[t];
+}
 
 
 static size_t
