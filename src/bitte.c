@@ -212,13 +212,15 @@ _put_last_trans(ftmap_t m, mut_oid_t fact, mut_trans_t last)
 		const size_t nu = ol + NTPB;
 		void *pi = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
 		void *po = xzfalloc(m->last, ol, nu, sizeof(*m->last));
+		void *p1 = xzfalloc(m->_1st, ol, nu, sizeof(*m->_1st));
 
-		if (UNLIKELY(pi == NULL || po == NULL)) {
+		if (UNLIKELY(pi == NULL || po == NULL || p1 == NULL)) {
 			/* brill */
 			return -1;
 		}
 		m->facts = pi;
 		m->last = po;
+		m->_1st = p1;
 	}
 	/* just ass our fact */
 	m->nfacts++;
