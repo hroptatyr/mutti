@@ -58,44 +58,44 @@ int
 main(int argc, char *const argv[])
 {
 	echs_set_now(dt_strp("2014-10-29T13:23:41.507", NULL));
-	bitte_put((mut_oid_t)"Alice_$200",
+	bitte_put(NULL, (mut_oid_t)"Alice_$200",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY));
 	echs_set_now(dt_strp("2014-10-29T13:53:41.507", NULL));
-	bitte_put((mut_oid_t)"Ann_$300",
+	bitte_put(NULL, (mut_oid_t)"Ann_$300",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 02, .H = ECHS_ALL_DAY));
 
 	echs_set_now(dt_strp("2014-10-29T14:23:41.507", NULL));
-	bitte_put((mut_oid_t)"Carl_$100",
+	bitte_put(NULL, (mut_oid_t)"Carl_$100",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY));
 	echs_set_now(dt_strp("2014-10-29T14:53:41.507", NULL));
-	bitte_put((mut_oid_t)"Alice_$200",
+	bitte_put(NULL, (mut_oid_t)"Alice_$200",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY}});
 
 	echs_set_now(dt_strp("2014-10-29T15:23:41.507", NULL));
-	bitte_put((mut_oid_t)"Alice_$500",
+	bitte_put(NULL, (mut_oid_t)"Alice_$500",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY));
 	echs_set_now(dt_strp("2014-10-29T15:53:41.507", NULL));
-	bitte_put((mut_oid_t)"Ellen_$700",
+	bitte_put(NULL, (mut_oid_t)"Ellen_$700",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY));
 
 	echs_set_now(dt_strp("2014-10-29T16:23:41.507", NULL));
-	bitte_put((mut_oid_t)"John_$400",
+	bitte_put(NULL, (mut_oid_t)"John_$400",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY));
 	echs_set_now(dt_strp("2014-10-29T16:53:41.507", NULL));
-	bitte_put((mut_oid_t)"John_$400",
+	bitte_put(NULL, (mut_oid_t)"John_$400",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 06, .H = ECHS_ALL_DAY}});
 
 	echs_set_now(dt_strp("2014-10-29T17:23:41.507", NULL));
-	bitte_put((mut_oid_t)"Alice_$500",
+	bitte_put(NULL, (mut_oid_t)"Alice_$500",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 06, .H = ECHS_ALL_DAY}});
 	echs_set_now(dt_strp("2014-10-29T17:53:41.507", NULL));
-	bitte_rem((mut_oid_t)"Ellen_$700");
+	bitte_rem(NULL, (mut_oid_t)"Ellen_$700");
 
 	{
 		mut_oid_t o[64U];
@@ -105,7 +105,7 @@ main(int argc, char *const argv[])
 		size_t n;
 
 		c = dt_strp("2014-10-29T16:30:00.000", NULL);
-		n = bitte_rtr(o, 64U, v, t, c);
+		n = bitte_rtr(NULL, o, 64U, v, t, c);
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
@@ -115,7 +115,7 @@ main(int argc, char *const argv[])
 		puts("");
 
 		c = dt_strp("2014-10-29T15:30:00.000", NULL);
-		n = bitte_rtr(o, 64U, v, t, c);
+		n = bitte_rtr(NULL, o, 64U, v, t, c);
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
@@ -125,7 +125,7 @@ main(int argc, char *const argv[])
 		puts("");
 
 		c = dt_strp("2014-10-29T17:00:00.000", NULL);
-		n = bitte_rtr(o, 64U, v, t, c);
+		n = bitte_rtr(NULL, o, 64U, v, t, c);
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
