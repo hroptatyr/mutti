@@ -37,6 +37,7 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <stdint.h>
 #include <sys/mman.h>
 #include <string.h>
 #include <assert.h>
@@ -56,6 +57,9 @@
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
+/* a transaction is simply an offset in the STOR SoA */
+typedef uintptr_t mut_trans_t;
+
 /* simple timeline index */
 struct tili_s {
 	size_t ntrans;
@@ -65,20 +69,21 @@ struct tili_s {
 };
 
 /* fact offsets into the timeline */
-struct foff_s {
+typedef struct ftmap_s {
 	size_t nfacts;
 	echs_instant_t trans;
 	mut_oid_t *facts;
-	size_t *offs;
-};
+	mut_trans_t *_1st;
+	mut_trans_t *last;
+} *ftmap_t;
 
 static struct tili_s stor;
-static struct foff_s live;
-static struct foff_s cache[64U];
+static struct ftmap_s live;
+static struct ftmap_s cache[64U];
 static size_t ncache;
 
-#define FACT_NOT_FOUND		((size_t)-1)
-#define FACT_NOT_FOUND_P(x)	(!~(size_t)(x))
+#define FACT_NOT_FOUND		((mut_trans_t)-1)
+#define FACT_NOT_FOUND_P(x)	(!~(mut_trans_t)(x))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
@@ -148,49 +153,82 @@ struct __##T##_defined_s
 DEFMIN(size_t);
 
 
-static size_t
-_get_foff(struct foff_s *v, mut_oid_t fact)
+static inline echs_instant_t
+trans_get_trans(mut_trans_t t)
 {
-	size_t i_fr = FACT_NOT_FOUND;
+	return stor.trans[t];
+}
 
-	for (size_t i = 0U; i < v->nfacts; i++) {
-		if (v->facts[i] == fact) {
-			return i;
+static inline mut_oid_t
+trans_get_fact(mut_trans_t t)
+{
+	return stor.facts[t];
+}
+
+static inline echs_range_t
+trans_get_valid(mut_trans_t t)
+{
+	return stor.valids[t];
+}
+
+
+static mut_trans_t
+_get_last_trans(ftmap_t m, mut_oid_t fact)
+{
+	for (size_t i = 0U; i < m->nfacts; i++) {
+		if (m->facts[i] == fact) {
+			return m->last[i];
 		}
 	}
-	return i_fr;
+	return FACT_NOT_FOUND;
+	
+}
+
+static mut_trans_t
+_get_first_trans(ftmap_t m, mut_oid_t fact)
+{
+	for (size_t i = 0U; i < m->nfacts; i++) {
+		if (m->facts[i] == fact) {
+			return m->_1st[i];
+		}
+	}
+	return FACT_NOT_FOUND;
 }
 
 static int
-_put_foff(struct foff_s *tgt, mut_oid_t fact, echs_instant_t t, size_t last)
+_put_last_trans(ftmap_t m, mut_oid_t fact, mut_trans_t last)
 {
 	size_t i;
 
-	i = _get_foff(tgt, fact);
-	if (!FACT_NOT_FOUND_P(i)) {
-		/* just update him then */
-		goto up_and_out;
+	for (i = 0U; i < m->nfacts; i++) {
+		if (m->facts[i] == fact) {
+			/* just update him then */
+			goto up_and_out;
+		}
 	}
 	/* we'll have to extend the list of live facts */
-	if (UNLIKELY((tgt->nfacts % NTPB) == 0U)) {
-		const size_t ol = tgt->nfacts;
+	if (UNLIKELY((m->nfacts % NTPB) == 0U)) {
+		const size_t ol = m->nfacts;
 		const size_t nu = ol + NTPB;
-		void *pi = xzfalloc(tgt->facts, ol, nu, sizeof(*tgt->facts));
-		void *po = xzfalloc(tgt->offs, ol, nu, sizeof(*tgt->offs));
+		void *pi = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
+		void *po = xzfalloc(m->last, ol, nu, sizeof(*m->last));
+		void *p1 = xzfalloc(m->_1st, ol, nu, sizeof(*m->_1st));
 
-		if (UNLIKELY(pi == NULL || po == NULL)) {
+		if (UNLIKELY(pi == NULL || po == NULL || p1 == NULL)) {
 			/* brill */
 			return -1;
 		}
-		tgt->facts = pi;
-		tgt->offs = po;
+		m->facts = pi;
+		m->last = po;
+		m->_1st = p1;
 	}
 	/* just ass our fact */
-	i = tgt->nfacts++;
-	tgt->facts[i] = fact;
+	m->nfacts++;
+	m->facts[i] = fact;
+	m->_1st[i] = last;
 up_and_out:
-	tgt->trans = t;
-	tgt->offs[i] = last;
+	m->trans = trans_get_trans(last);
+	m->last[i] = last;
 	return 0;
 }
 
@@ -224,27 +262,25 @@ tili_resize(struct tili_s *restrict s, size_t nadd)
 static echs_bitmp_t
 _bitte_get_as_of_now(mut_oid_t fact)
 {
-	size_t i;
+	mut_trans_t t = _get_last_trans(&live, fact);
 
-	i = _get_foff(&live, fact);
-	if (FACT_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(t)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
 	/* yay, dead or alive, it's in our books */
-	i = live.offs[i];
 	return (echs_bitmp_t){
-		stor.valids[i],
-		(echs_range_t){stor.trans[i], ECHS_UNTIL_CHANGED}
+		stor.valids[t],
+		(echs_range_t){stor.trans[t], ECHS_UNTIL_CHANGED}
 	};
 }
 
 static echs_bitmp_t
 _bitte_get(mut_oid_t fact, echs_instant_t as_of)
 {
-	size_t i_last_before = FACT_NOT_FOUND;
-	size_t i_first_after = FACT_NOT_FOUND;
-	size_t i = 0U;
+	mut_trans_t i_last_before = FACT_NOT_FOUND;
+	mut_trans_t i_first_after = FACT_NOT_FOUND;
+	mut_trans_t i = 0U;
 
 	for (; i < stor.ntrans &&
 		     echs_instant_le_p(stor.trans[i], as_of); i++) {
@@ -294,7 +330,7 @@ _bitte_rtr_as_of_now(mut_oid_t *restrict fact, size_t nfact)
 	const size_t n = min(size_t, nfact, live.nfacts);
 
 	for (size_t i = 0U; i < n; i++) {
-		fact[i] = (mut_oid_t)live.offs[i];
+		fact[i] = (mut_oid_t)live.last[i];
 	}
 	return n;
 }
@@ -304,23 +340,24 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 {
 	/* cache index */
 	size_t ci;
-	/* timeline index (aka offset) */
-	size_t ti = 0U;
+	/* timeline index */
+	mut_trans_t ti = 0U;
 
 	/* try caches */
 	for (ci = 0U; ci < ncache; ci++) {
 		if (!echs_instant_lt_p(as_of, cache[ci].trans)) {
 			/* found one */
-			break;
+			goto evolv;
 		}
 	}
-	if (ci < ncache) {
+	if (0) {
+	evolv:
 		/* yay, found a cache we can evolve,
 		 * find highest offset into trans so we know where to
 		 * start scanning */
 		for (size_t i = 0U; i < cache[ci].nfacts; i++) {
-			if (cache[ci].offs[i] > ti) {
-				ti = cache[ci].offs[i];
+			if (cache[ci].last[i] > ti) {
+				ti = cache[ci].last[i];
 			}
 		}
 		/* we can start a bit later since the TI-th offset is covered */
@@ -341,44 +378,54 @@ _bitte_rtr(mut_oid_t *restrict fact, size_t nfact, echs_instant_t as_of)
 	for (echs_instant_t t;
 	     ti < stor.ntrans &&
 		     (t = stor.trans[ti], echs_instant_le_p(t, as_of)); ti++) {
-		_put_foff(cache + ci, stor.facts[ti], t, ti);
+		_put_last_trans(cache + ci, stor.facts[ti], ti);
 	}
 
 	/* same as _bitte_rtr_as_of_now() now */
 	const size_t n = min(size_t, nfact, cache[ci].nfacts);
 
 	for (size_t i = 0U; i < n; i++) {
-		fact[i] = (mut_oid_t)cache[ci].offs[i];
+		fact[i] = (mut_oid_t)cache[ci].last[i];
 	}
 	return n;
 }
 
+static echs_range_t
+_bitte_trend(mut_trans_t t)
+{
+/* return the transaction interval for transaction T */
+	const mut_oid_t f = trans_get_fact(t);
+	const mut_trans_t hi = _get_last_trans(&live, f);
+	echs_range_t res;
+
+	assert(!FACT_NOT_FOUND_P(hi));
+	if (hi == t) {
+		/* this transaction is still current, i.e. open-ended */
+		return ECHS_RANGE_FROM(trans_get_trans(t));
+	}
+	assert(t < hi);
+
+	/* best known upper bound is the one in the live blob */
+	res = (echs_range_t){trans_get_trans(t), trans_get_trans(hi)};
+	/* and now scan the timeline between T and HI */
+	for (mut_trans_t i = t + 1U; i < hi; i++) {
+		if (f == trans_get_fact(i)) {
+			res.till = trans_get_trans(i);
+			break;
+		}
+	}
+	return res;
+}
+
 static void
-_bitte_trend(echs_range_t *restrict trans, const mut_oid_t *of, size_t nof)
+_bitte_trends(echs_range_t *restrict tt, const mut_trans_t *t, size_t nt)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
 	/* try and lookup each of the facts in the live blob */
-	for (size_t i = 0U; i < nof; i++) {
-		const size_t o = of[i];
-		const mut_oid_t f = stor.facts[o];
-		const size_t hi = _get_foff(&live, f);
-		const size_t ohi = live.offs[hi];
+	for (size_t i = 0U; i < nt; i++) {
+		const mut_trans_t o = t[i];
 
-		assert(!FACT_NOT_FOUND_P(hi));
-		if (ohi == o) {
-			trans[i] = ECHS_RANGE_FROM(stor.trans[o]);
-			continue;
-		}
-		assert(o < ohi);
-		/* best known upper bound is the one in the live blob */
-		trans[i] = (echs_range_t){stor.trans[o], stor.trans[ohi]};
-		/* and now scan the timeline between O and HI */
-		for (size_t j = o + 1U; j < ohi; j++) {
-			if (stor.facts[j] == f) {
-				trans[i].till = stor.trans[j];
-				break;
-			}
-		}
+		tt[i] = _bitte_trend(o);
 	}
 	return;
 }
@@ -402,7 +449,7 @@ bitte_put(mut_oid_t fact, echs_range_t valid)
 		stor.facts[it] = fact;
 		stor.valids[it] = valid;
 
-		_put_foff(&live, fact, t, it);
+		_put_last_trans(&live, fact, it);
 	}
 	return 0;
 }
@@ -410,12 +457,12 @@ bitte_put(mut_oid_t fact, echs_range_t valid)
 int
 bitte_rem(mut_oid_t fact)
 {
-	const size_t i = _get_foff(&live, fact);
+	const mut_trans_t t = _get_last_trans(&live, fact);
 
-	if (FACT_NOT_FOUND_P(i)) {
+	if (FACT_NOT_FOUND_P(t)) {
 		/* he's dead already */
 		return -1;
-	} else if (echs_nul_range_p(stor.valids[live.offs[i]])) {
+	} else if (echs_nul_range_p(trans_get_valid(t))) {
 		/* dead already, just */
 		return -1;
 	}
@@ -425,14 +472,14 @@ bitte_rem(mut_oid_t fact)
 		return -1;
 	}
 	/* stamp him off */
-	with (echs_instant_t t = echs_now()) {
+	with (echs_instant_t now = echs_now()) {
 		const size_t it = stor.ntrans++;
 
-		stor.trans[it] = t;
+		stor.trans[it] = now;
 		stor.facts[it] = fact;
 		stor.valids[it] = echs_nul_range();
 
-		_put_foff(&live, fact, t, it);
+		_put_last_trans(&live, fact, it);
 	}
 	return 0;
 }
@@ -456,9 +503,9 @@ bitte_get(mut_oid_t fact, echs_instant_t as_of)
 int
 bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	const size_t oi = _get_foff(&live, old);
+	const mut_trans_t ot = _get_last_trans(&live, old);
 
-	if (FACT_NOT_FOUND_P(oi)) {
+	if (FACT_NOT_FOUND_P(ot)) {
 		/* must be dead, cannot supersede */
 		return -1;
 	}
@@ -478,7 +525,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 		with (const size_t it = stor.ntrans++) {
 			/* build new validity */
 			echs_range_t nuv = {
-				.from = stor.valids[live.offs[oi]].from,
+				.from = trans_get_valid(ot).from,
 				.till = valid.from,
 			};
 
@@ -487,7 +534,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 			stor.facts[it] = old;
 			stor.valids[it] = nuv;
 
-			_put_foff(&live, old, t, it);
+			_put_last_trans(&live, old, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
@@ -498,7 +545,7 @@ bitte_supersede(mut_oid_t old, mut_oid_t new, echs_range_t valid)
 			stor.facts[it] = new;
 			stor.valids[it] = valid;
 
-			_put_foff(&live, new, t, it);
+			_put_last_trans(&live, new, it);
 		}
 	}
 	return 0;
@@ -542,7 +589,7 @@ bitte_rtr(
 		 * well, we scan again for any of the offsets in
 		 * FACT and find the next transaction and put it into
 		 * TRANS. */
-		_bitte_trend(trans, fact, res);
+		_bitte_trends(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
@@ -574,7 +621,7 @@ bitte_scan(
 	}
 	/* go through FACT table and bang real objects */
 	if (trans != NULL) {
-		_bitte_trend(trans, fact, res);
+		_bitte_trends(trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
@@ -595,11 +642,16 @@ bitte_hist(
 	echs_range_t *restrict trans, size_t ntrans,
 	echs_range_t *restrict valid, mut_oid_t fact)
 {
+	const mut_trans_t t1 = _get_first_trans(&live, fact);
 	size_t res = 0U;
 
+	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
+		/* if there's no last transaction, there can be no 1st either */
+		return 0U;
+	}
 	/* traverse the timeline and store offsets to transactions */
-	for (size_t i = 0U; i < stor.ntrans && res < ntrans; i++) {
-		if (stor.facts[i] == fact) {
+	for (mut_trans_t i = t1; i < stor.ntrans && res < ntrans; i++) {
+		if (fact == trans_get_fact(i)) {
 			trans[res++].from.u = i;
 		}
 	}
