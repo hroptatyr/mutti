@@ -51,28 +51,40 @@ typedef struct {
 	echs_range_t trans;
 } echs_bitmp_t;
 
+typedef struct mut_stor_s *mut_stor_t;
+
 
 /**
+ * Open a mutti store at filename FN using opening flags FLAGS.
+ * Use NULL for FN to indicate an in-memory store.
+ * FLAGS are the usual flags as passed to open(3). */
+extern mut_stor_t mut_stor_open(const char *fn, int flags);
+
+/**
+ * Close the mutti store and free associated resources. */
+extern void mut_stor_close(mut_stor_t);
+
+/**
  * Return the full bitemporal stamp of FACT (as of AS_OF). */
-extern echs_bitmp_t bitte_get(mut_oid_t fact, echs_instant_t as_of);
+extern echs_bitmp_t bitte_get(mut_stor_t, mut_oid_t fact, echs_instant_t as_of);
 
 /**
  * Put FACT with valid time VALID. */
-extern int bitte_put(mut_oid_t fact, echs_range_t valid);
+extern int bitte_put(mut_stor_t, mut_oid_t fact, echs_range_t valid);
 
 /**
- * Supersede FACT1 with FACT2 and new validity VALID.
+ * Supersede OLDF with NEWF and new validity VALID.
  * The current validity of FACT1 is extended/restricted to the
  * beginning of VALID.  For all modifications the same transaction
  * time is used. */
 extern int
-bitte_supersede(mut_oid_t old_fact, mut_oid_t new_fact, echs_range_t valid);
+bitte_supersede(mut_stor_t, mut_oid_t oldf, mut_oid_t newf, echs_range_t valid);
 
 /**
  * Remove FACT.
  * This is equivalent to
  *   bitte_supersede(FACT, MUT_NUL_OID, ECHS_NUL_RANGE); */
-extern int bitte_rem(mut_oid_t fact);
+extern int bitte_rem(mut_stor_t, mut_oid_t fact);
 
 /**
  * Retrieve all known FACTs as of AS_OF (known as transaction time slice).
@@ -83,6 +95,7 @@ extern int bitte_rem(mut_oid_t fact);
  * Return the number of facts retrievable. */
 extern size_t
 bitte_rtr(
+	mut_stor_t,
 	mut_oid_t *restrict fact, size_t nfact,
 	echs_range_t *restrict valid, echs_range_t *restrict trans,
 	echs_instant_t as_of);
@@ -96,6 +109,7 @@ bitte_rtr(
  * Return the number of facts retrievable. */
 extern size_t
 bitte_scan(
+	mut_stor_t,
 	mut_oid_t *restrict fact, size_t nfact,
 	echs_range_t *restrict valid, echs_range_t *restrict trans,
 	echs_instant_t vtime);
@@ -107,6 +121,7 @@ bitte_scan(
  * Return the number of transactions. */
 extern size_t
 bitte_hist(
+	mut_stor_t,
 	echs_range_t *restrict trans, size_t ntrans,
 	echs_range_t *restrict valid, mut_oid_t fact);
 

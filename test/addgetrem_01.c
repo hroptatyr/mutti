@@ -58,49 +58,49 @@ int
 main(int argc, char *const argv[])
 {
 	echs_set_now(dt_strp("2014-10-29T13:23:41.507", NULL));
-	bitte_put((mut_oid_t)"Alice_$200",
+	bitte_put(NULL, (mut_oid_t)"Alice_$200",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY));
-	bitte_put((mut_oid_t)"Ann_$300",
+	bitte_put(NULL, (mut_oid_t)"Ann_$300",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 02, .H = ECHS_ALL_DAY));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Ann_$300", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Ann_$300", ECHS_SOON));
 
-	bitte_put((mut_oid_t)"Carl_$100",
+	bitte_put(NULL, (mut_oid_t)"Carl_$100",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY));
-	bitte_put((mut_oid_t)"Alice_$200",
+	bitte_put(NULL, (mut_oid_t)"Alice_$200",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 01, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY}});
-	pr_bitmp(bitte_get((mut_oid_t)"Carl_$100", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Carl_$100", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$200", ECHS_SOON));
 
-	bitte_put((mut_oid_t)"Alice_$500",
+	bitte_put(NULL, (mut_oid_t)"Alice_$500",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY));
-	bitte_put((mut_oid_t)"Ellen_$700",
+	bitte_put(NULL, (mut_oid_t)"Ellen_$700",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY));
-	pr_bitmp(bitte_get((mut_oid_t)"Carl_$100", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Ellen_$700", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$500", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Carl_$100", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Ellen_$700", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$500", ECHS_SOON));
 
-	bitte_put((mut_oid_t)"John_$400",
+	bitte_put(NULL, (mut_oid_t)"John_$400",
 		  ECHS_FROM(.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY));
-	bitte_put((mut_oid_t)"John_$400",
+	bitte_put(NULL, (mut_oid_t)"John_$400",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 05, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 06, .H = ECHS_ALL_DAY}});
-	pr_bitmp(bitte_get((mut_oid_t)"John_$400", ECHS_SOON));
-	bitte_put((mut_oid_t)"Alice_$500",
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"John_$400", ECHS_SOON));
+	bitte_put(NULL, (mut_oid_t)"Alice_$500",
 		  (echs_range_t){
 			  {.y = 2012, .m = 01, .d = 03, .H = ECHS_ALL_DAY},
 			  {.y = 2012, .m = 01, .d = 06, .H = ECHS_ALL_DAY}});
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$500", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$500", ECHS_SOON));
 
-	bitte_rem((mut_oid_t)"Ellen_$700");
-	pr_bitmp(bitte_get((mut_oid_t)"Carl_$100", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Alice_$200", ECHS_SOON));
-	pr_bitmp(bitte_get((mut_oid_t)"Ellen_$700", ECHS_SOON));
+	bitte_rem(NULL, (mut_oid_t)"Ellen_$700");
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Carl_$100", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Alice_$200", ECHS_SOON));
+	pr_bitmp(bitte_get(NULL, (mut_oid_t)"Ellen_$700", ECHS_SOON));
 	return 0;
 }
 
