@@ -640,11 +640,16 @@ bitte_hist(
 	echs_range_t *restrict trans, size_t ntrans,
 	echs_range_t *restrict valid, mut_oid_t fact)
 {
+	const mut_trans_t t1 = _get_first_trans(&live, fact);
 	size_t res = 0U;
 
+	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
+		/* if there's no last transaction, there can be no 1st either */
+		return 0U;
+	}
 	/* traverse the timeline and store offsets to transactions */
-	for (size_t i = 0U; i < stor.ntrans && res < ntrans; i++) {
-		if (stor.facts[i] == fact) {
+	for (mut_trans_t i = t1; i < stor.ntrans && res < ntrans; i++) {
+		if (fact == trans_get_fact(i)) {
 			trans[res++].from.u = i;
 		}
 	}
