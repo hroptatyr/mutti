@@ -75,10 +75,19 @@ init_impls(void)
 mut_stor_t
 mut_stor_open(mut_stor_type_t type, const char *fn, int fl)
 {
+	mut_stor_t s;
+
 	if (UNLIKELY(type >= NMUT_STOR_TYPES)) {
 		return NULL;
 	}
-	return impls[type].mut_stor_open_f(fn, fl);
+	if (type == MUT_STOR_TYPE_UNK) {
+		type = MUT_STOR_DFLT_TYPE;
+	}
+	if (UNLIKELY((s = impls[type].mut_stor_open_f(fn, fl)) == NULL)) {
+		return NULL;
+	}
+	s->super.type = type;
+	return s;
 }
 
 void
