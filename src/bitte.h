@@ -60,7 +60,8 @@ typedef enum {
 	NMUT_STOR_TYPES,
 } mut_stor_type_t;
 
-struct mut_stor_super_s {
+/* this is what we can guarantee about mut_stor_s */
+struct mut_stor_s {
 	mut_stor_type_t type;
 };
 

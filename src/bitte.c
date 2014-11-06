@@ -47,13 +47,8 @@
 #include "nifty.h"
 
 #define MUT_STOR_DFLT_TYPE	(MUT_STOR_TYPE_MEM)
-#define MUT_STOR_TYPE(x)	((x) ? (x)->super.type : MUT_STOR_DFLT_TYPE)
+#define MUT_STOR_TYPE(x)	((x) ? (x)->type : MUT_STOR_DFLT_TYPE)
 #define MUT_STOR_IMPL(x, f)	impls[MUT_STOR_TYPE(x)]._paste(f, _f)
-
-/* we promised to define the mut_stor_s struct */
-struct mut_stor_s {
-	struct mut_stor_super_s super;
-};
 
 static struct bitte_backend_s impls[NMUT_STOR_TYPES];
 
@@ -86,7 +81,7 @@ mut_stor_open(mut_stor_type_t type, const char *fn, int fl)
 	if (UNLIKELY((s = impls[type].mut_stor_open_f(fn, fl)) == NULL)) {
 		return NULL;
 	}
-	s->super.type = type;
+	s->type = type;
 	return s;
 }
 
