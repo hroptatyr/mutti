@@ -57,7 +57,7 @@ pr_bitmp(echs_bitmp_t r)
 int
 main(int argc, char *const argv[])
 {
-	mut_stor_t s = mut_stor_open(NULL, 0);
+	mut_stor_t s = mut_stor_open(MUT_STOR_TYPE_MEM, NULL, 0);
 
 	echs_set_now(dt_strp("2014-10-29T13:23:41.507", NULL));
 	bitte_put(s, (mut_oid_t)"Alice_$200",
