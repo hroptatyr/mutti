@@ -517,6 +517,9 @@ _close(mut_stor_t s)
 	for (size_t i = 0U; i < _s->ncache; i++) {
 		ftmap_free(_s->cache + i);
 	}
+	if (s != NULL) {
+		free(_s);
+	}
 	return;
 }
 
