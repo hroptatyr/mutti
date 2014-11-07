@@ -316,7 +316,7 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 
 /* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
-_bitte_get_as_of_now(_stor_t s, mut_oid_t fact)
+_get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 	mut_tid_t t = _get_last_trans(&s->live, fact);
 
@@ -332,7 +332,7 @@ _bitte_get_as_of_now(_stor_t s, mut_oid_t fact)
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
-_bitte_get(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
+_get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 	mut_tid_t i_last_before = FACT_NOT_FOUND;
 	mut_tid_t i_first_after = FACT_NOT_FOUND;
@@ -607,10 +607,10 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
 	else if (echs_instant_le_p(_s->live.trans, as_of)) {
-		return _bitte_get_as_of_now(_s, fact);
+		return _get_as_of_now(_s, fact);
 	}
 	/* otherwise proceed to scan */
-	return _bitte_get(_s, fact, as_of);
+	return _get_as_of_then(_s, fact, as_of);
 }
 
 static int
