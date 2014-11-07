@@ -60,8 +60,8 @@
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
-/* a transaction is simply an offset in the STOR SoA */
-typedef uintptr_t mut_trans_t;
+/* a transaction id is simply an offset in the STOR SoA */
+typedef uintptr_t mut_tid_t;
 
 /* simple timeline index */
 struct tmln_s {
@@ -76,12 +76,12 @@ typedef struct ftmap_s {
 	size_t nfacts;
 	echs_instant_t trans;
 	mut_oid_t *facts;
-	mut_trans_t *_1st;
-	mut_trans_t *last;
+	mut_tid_t *_1st;
+	mut_tid_t *last;
 } *ftmap_t;
 
-#define FACT_NOT_FOUND		((mut_trans_t)-1)
-#define FACT_NOT_FOUND_P(x)	(!~(mut_trans_t)(x))
+#define FACT_NOT_FOUND		((mut_tid_t)-1)
+#define FACT_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
@@ -164,31 +164,31 @@ DEFMIN(size_t);
 
 
 static inline __attribute__((nonnull(1), const, pure)) size_t
-trans_ntrans(const struct _stor_s *s)
+_stor_ntrans(const struct _stor_s *s)
 {
 	return s->tmln.ntrans;
 }
 
 static inline __attribute__((nonnull(1))) echs_instant_t
-trans_get_trans(const struct _stor_s *s, mut_trans_t t)
+_stor_get_trans(const struct _stor_s *s, mut_tid_t t)
 {
 	return s->tmln.trans[t];
 }
 
 static inline __attribute__((nonnull(1))) mut_oid_t
-trans_get_fact(const struct _stor_s *s, mut_trans_t t)
+_stor_get_fact(const struct _stor_s *s, mut_tid_t t)
 {
 	return s->tmln.facts[t];
 }
 
 static inline __attribute__((nonnull(1))) echs_range_t
-trans_get_valid(const struct _stor_s *s, mut_trans_t t)
+_stor_get_valid(const struct _stor_s *s, mut_tid_t t)
 {
 	return s->tmln.valids[t];
 }
 
 
-static __attribute__((nonnull(1))) mut_trans_t
+static __attribute__((nonnull(1))) mut_tid_t
 _get_last_trans(const struct ftmap_s *m, mut_oid_t fact)
 {
 	for (size_t i = 0U; i < m->nfacts; i++) {
@@ -200,7 +200,7 @@ _get_last_trans(const struct ftmap_s *m, mut_oid_t fact)
 	
 }
 
-static __attribute__((nonnull(1))) mut_trans_t
+static __attribute__((nonnull(1))) mut_tid_t
 _get_first_trans(const struct ftmap_s *m, mut_oid_t fact)
 {
 	for (size_t i = 0U; i < m->nfacts; i++) {
@@ -212,7 +212,7 @@ _get_first_trans(const struct ftmap_s *m, mut_oid_t fact)
 }
 
 static int
-_put_last_trans(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_trans_t last)
+_put_last_trans(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 {
 	size_t i;
 
@@ -318,7 +318,7 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _bitte_get_as_of_now(_stor_t s, mut_oid_t fact)
 {
-	mut_trans_t t = _get_last_trans(&s->live, fact);
+	mut_tid_t t = _get_last_trans(&s->live, fact);
 
 	if (FACT_NOT_FOUND_P(t)) {
 		/* must be dead */
@@ -326,21 +326,21 @@ _bitte_get_as_of_now(_stor_t s, mut_oid_t fact)
 	}
 	/* yay, dead or alive, it's in our books */
 	return (echs_bitmp_t){
-		trans_get_valid(s, t),
-		ECHS_RANGE_FROM(trans_get_trans(s, t)),
+		_stor_get_valid(s, t),
+		ECHS_RANGE_FROM(_stor_get_trans(s, t)),
 	};
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
 _bitte_get(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
-	mut_trans_t i_last_before = FACT_NOT_FOUND;
-	mut_trans_t i_first_after = FACT_NOT_FOUND;
-	mut_trans_t i = 0U;
+	mut_tid_t i_last_before = FACT_NOT_FOUND;
+	mut_tid_t i_first_after = FACT_NOT_FOUND;
+	mut_tid_t i = 0U;
 
-	for (; i < trans_ntrans(s) &&
-		     echs_instant_le_p(trans_get_trans(s, i), as_of); i++) {
-		if (fact == trans_get_fact(s, i)) {
+	for (; i < _stor_ntrans(s) &&
+		     echs_instant_le_p(_stor_get_trans(s, i), as_of); i++) {
+		if (fact == _stor_get_fact(s, i)) {
 			i_last_before = i;
 		}
 	}
@@ -352,8 +352,8 @@ _bitte_get(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* keep scanning, because the fact might have been superseded by
 	 * a more recent transaction */
-	for (; i < trans_ntrans(s); i++) {
-		if (fact == trans_get_fact(s, i)) {
+	for (; i < _stor_ntrans(s); i++) {
+		if (fact == _stor_get_fact(s, i)) {
 			i_first_after = i;
 			break;
 		}
@@ -363,18 +363,18 @@ _bitte_get(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	if (FACT_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
-			trans_get_valid(s, i_last_before),
-			ECHS_RANGE_FROM(trans_get_trans(s, i_last_before))
+			_stor_get_valid(s, i_last_before),
+			ECHS_RANGE_FROM(_stor_get_trans(s, i_last_before))
 		};
 	}
 
 	/* yay, dead or alive, it's in our books */
 	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
-		trans_get_valid(s, i_last_before),
+		_stor_get_valid(s, i_last_before),
 		(echs_range_t){
-			trans_get_trans(s, i_last_before),
-			trans_get_trans(s, i_first_after)
+			_stor_get_trans(s, i_last_before),
+			_stor_get_trans(s, i_first_after)
 		}
 	};
 }
@@ -399,7 +399,7 @@ _bitte_rtr(
 	/* cache index */
 	size_t ci;
 	/* timeline index */
-	mut_trans_t ti = 0U;
+	mut_tid_t ti = 0U;
 
 	/* try caches */
 	for (ci = 0U; ci < s->ncache; ci++) {
@@ -434,10 +434,10 @@ _bitte_rtr(
 	}
 	/* now start materialising the cache */
 	for (echs_instant_t t;
-	     ti < trans_ntrans(s) &&
-		     (t = trans_get_trans(s, ti), echs_instant_le_p(t, as_of));
+	     ti < _stor_ntrans(s) &&
+		     (t = _stor_get_trans(s, ti), echs_instant_le_p(t, as_of));
 	     ti++) {
-		const mut_oid_t f = trans_get_fact(s, ti);
+		const mut_oid_t f = _stor_get_fact(s, ti);
 		_put_last_trans(s->cache + ci, f, t, ti);
 	}
 
@@ -451,26 +451,26 @@ _bitte_rtr(
 }
 
 static __attribute__((nonnull(1))) echs_range_t
-_bitte_trend(const struct _stor_s *s, mut_trans_t t)
+_bitte_trend(const struct _stor_s *s, mut_tid_t t)
 {
 /* return the transaction interval for transaction T */
-	const mut_oid_t f = trans_get_fact(s, t);
-	const mut_trans_t hi = _get_last_trans(&s->live, f);
+	const mut_oid_t f = _stor_get_fact(s, t);
+	const mut_tid_t hi = _get_last_trans(&s->live, f);
 	echs_range_t res;
 
 	assert(!FACT_NOT_FOUND_P(hi));
 	if (hi == t) {
 		/* this transaction is still current, i.e. open-ended */
-		return ECHS_RANGE_FROM(trans_get_trans(s, t));
+		return ECHS_RANGE_FROM(_stor_get_trans(s, t));
 	}
 	assert(t < hi);
 
 	/* best known upper bound is the one in the live blob */
-	res = (echs_range_t){trans_get_trans(s, t), trans_get_trans(s, hi)};
+	res = (echs_range_t){_stor_get_trans(s, t), _stor_get_trans(s, hi)};
 	/* and now scan the timeline between T and HI */
-	for (mut_trans_t i = t + 1U; i < hi; i++) {
-		if (f == trans_get_fact(s, i)) {
-			res.till = trans_get_trans(s, i);
+	for (mut_tid_t i = t + 1U; i < hi; i++) {
+		if (f == _stor_get_fact(s, i)) {
+			res.till = _stor_get_trans(s, i);
 			break;
 		}
 	}
@@ -480,12 +480,12 @@ _bitte_trend(const struct _stor_s *s, mut_trans_t t)
 static __attribute__((nonnull(1))) void
 _bitte_trends(
 	const struct _stor_s *s, echs_range_t *restrict tt,
-	const mut_trans_t *t, size_t nt)
+	const mut_tid_t *t, size_t nt)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
 	/* try and lookup each of the facts in the live blob */
 	for (size_t i = 0U; i < nt; i++) {
-		const mut_trans_t o = t[i];
+		const mut_tid_t o = t[i];
 
 		tt[i] = _bitte_trend(s, o);
 	}
@@ -559,12 +559,12 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s = &stor;
 	}
 
-	const mut_trans_t t = _get_last_trans(&_s->live, fact);
+	const mut_tid_t t = _get_last_trans(&_s->live, fact);
 
 	if (FACT_NOT_FOUND_P(t)) {
 		/* he's dead already */
 		return -1;
-	} else if (echs_nul_range_p(trans_get_valid(_s, t))) {
+	} else if (echs_nul_range_p(_stor_get_valid(_s, t))) {
 		/* dead already, just */
 		return -1;
 	}
@@ -621,7 +621,7 @@ _supersede(
 		_s = &stor;
 	}
 
-	const mut_trans_t ot = _get_last_trans(&_s->live, old);
+	const mut_tid_t ot = _get_last_trans(&_s->live, old);
 
 	if (FACT_NOT_FOUND_P(ot)) {
 		/* must be dead, cannot supersede */
@@ -644,7 +644,7 @@ _supersede(
 		with (const size_t it = _s->tmln.ntrans++) {
 			/* build new validity */
 			echs_range_t nuv = {
-				.from = trans_get_valid(_s, ot).from,
+				.from = _stor_get_valid(_s, ot).from,
 				.till = valid.from,
 			};
 
@@ -688,7 +688,7 @@ _rtr(
 		/* use static resources */
 		_s = &stor;
 	}
-	if (UNLIKELY(!trans_ntrans(_s))) {
+	if (UNLIKELY(!_stor_ntrans(_s))) {
 		/* no transactions in this store, trivial*/
 		return 0U;
 	}
@@ -707,7 +707,7 @@ _rtr(
 	if (trans != NULL && currentp) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			trans[i] = ECHS_RANGE_FROM(trans_get_trans(_s, o));
+			trans[i] = ECHS_RANGE_FROM(_stor_get_trans(_s, o));
 		}
 	} else if (trans != NULL) {
 		/* cluster fuck, how do we know when trans[o] ends?
@@ -719,13 +719,13 @@ _rtr(
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			valid[i] = trans_get_valid(_s, o);
+			valid[i] = _stor_get_valid(_s, o);
 		}
 	}
 	/* ... and finally */
 	for (size_t i = 0U; i < res; i++) {
 		const size_t o = fact[i];
-		fact[i] = trans_get_fact(_s, o);
+		fact[i] = _stor_get_fact(_s, o);
 	}
 	return res;
 }
@@ -746,8 +746,8 @@ _scan(
 	}
 
 	/* store offsets in FACT table first */
-	for (size_t i = 0U; i < trans_ntrans(_s) && res < nfact; i++) {
-		if (echs_in_range_p(trans_get_valid(_s, i), vtime)) {
+	for (size_t i = 0U; i < _stor_ntrans(_s) && res < nfact; i++) {
+		if (echs_in_range_p(_stor_get_valid(_s, i), vtime)) {
 			fact[res++] = i;
 		}
 	}
@@ -758,13 +758,13 @@ _scan(
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			valid[i] = trans_get_valid(_s, o);
+			valid[i] = _stor_get_valid(_s, o);
 		}
 	}
 	/* ... and finally */
 	for (size_t i = 0U; i < res; i++) {
 		const size_t o = fact[i];
-		fact[i] = trans_get_fact(_s, o);
+		fact[i] = _stor_get_fact(_s, o);
 	}
 	return res;
 }
@@ -783,15 +783,15 @@ _hist(
 		_s = &stor;
 	}
 
-	const mut_trans_t t1 = _get_first_trans(&_s->live, fact);
+	const mut_tid_t t1 = _get_first_trans(&_s->live, fact);
 
 	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
 		/* if there's no last transaction, there can be no 1st either */
 		return 0U;
 	}
 	/* traverse the timeline and store offsets to transactions */
-	for (mut_trans_t i = t1; i < trans_ntrans(_s) && res < ntrans; i++) {
-		if (fact == trans_get_fact(_s, i)) {
+	for (mut_tid_t i = t1; i < _stor_ntrans(_s) && res < ntrans; i++) {
+		if (fact == _stor_get_fact(_s, i)) {
 			trans[res++].from.u = i;
 		}
 	}
