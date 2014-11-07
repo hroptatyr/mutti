@@ -37,6 +37,7 @@
 #if !defined INCLUDED_bitte_h_
 #define INCLUDED_bitte_h_
 #include <stdint.h>
+#include <fcntl.h>
 #include "instant.h"
 #include "range.h"
 
@@ -64,6 +65,11 @@ typedef enum {
 struct mut_stor_s {
 	mut_stor_type_t type;
 };
+
+#define MUT_CREAT	(O_CREAT)
+#define MUT_TRUNC	(O_TRUNC)
+#define MUT_RDWR	(O_RDWR)
+#define MUT_RDONLY	(O_RDONLY)
 
 
 /**
