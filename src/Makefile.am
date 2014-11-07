@@ -27,9 +27,12 @@ EXTRA_libmutti_la_SOURCES =
 libmutti_la_SOURCES += instant.c instant.h
 libmutti_la_SOURCES += range.c range.h
 libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
-libmutti_la_SOURCES += bitte.c bitte.h
+libmutti_la_SOURCES += bitte.c bitte.h bitte-private.h
+libmutti_la_SOURCES += bitte-mem.c
+libmutti_la_SOURCES += bitte-bdb.c
 libmutti_la_SOURCES += nifty.h
 libmutti_la_LDFLAGS = $(AM_LDFLAGS)
+libmutti_la_LDFLAGS += -ldb
 libmutti_la_LDFLAGS += -lm
 EXTRA_libmutti_la_SOURCES += wikisort.c
 

@@ -37,6 +37,7 @@
 #if !defined INCLUDED_bitte_h_
 #define INCLUDED_bitte_h_
 #include <stdint.h>
+#include <fcntl.h>
 #include "instant.h"
 #include "range.h"
 
@@ -53,24 +54,45 @@ typedef struct {
 
 typedef struct mut_stor_s *mut_stor_t;
 
+typedef enum {
+	MUT_STOR_TYPE_UNK,
+	MUT_STOR_TYPE_MEM,
+	MUT_STOR_TYPE_BDB,
+	NMUT_STOR_TYPES,
+} mut_stor_type_t;
+
+/* this is what we can guarantee about mut_stor_s */
+struct mut_stor_s {
+	mut_stor_type_t type;
+};
+
+#define MUT_CREAT	(O_CREAT)
+#define MUT_TRUNC	(O_TRUNC)
+#define MUT_RDWR	(O_RDWR)
+#define MUT_RDONLY	(O_RDONLY)
+
 
 /**
  * Open a mutti store at filename FN using opening flags FLAGS.
  * Use NULL for FN to indicate an in-memory store.
  * FLAGS are the usual flags as passed to open(3). */
-extern mut_stor_t mut_stor_open(const char *fn, int flags);
+extern mut_stor_t
+mut_stor_open(mut_stor_type_t, const char *fn, int flags);
 
 /**
  * Close the mutti store and free associated resources. */
-extern void mut_stor_close(mut_stor_t);
+extern void
+mut_stor_close(mut_stor_t);
 
 /**
  * Return the full bitemporal stamp of FACT (as of AS_OF). */
-extern echs_bitmp_t bitte_get(mut_stor_t, mut_oid_t fact, echs_instant_t as_of);
+extern echs_bitmp_t
+bitte_get(mut_stor_t, mut_oid_t fact, echs_instant_t as_of);
 
 /**
  * Put FACT with valid time VALID. */
-extern int bitte_put(mut_stor_t, mut_oid_t fact, echs_range_t valid);
+extern int
+bitte_put(mut_stor_t, mut_oid_t fact, echs_range_t valid);
 
 /**
  * Supersede OLDF with NEWF and new validity VALID.
@@ -84,7 +106,8 @@ bitte_supersede(mut_stor_t, mut_oid_t oldf, mut_oid_t newf, echs_range_t valid);
  * Remove FACT.
  * This is equivalent to
  *   bitte_supersede(FACT, MUT_NUL_OID, ECHS_NUL_RANGE); */
-extern int bitte_rem(mut_stor_t, mut_oid_t fact);
+extern int
+bitte_rem(mut_stor_t, mut_oid_t fact);
 
 /**
  * Retrieve all known FACTs as of AS_OF (known as transaction time slice).
