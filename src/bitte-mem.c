@@ -86,16 +86,16 @@ typedef struct ftmap_s {
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
 /* we promised to define the mut_stor_s struct */
-struct mut_stor_s {
-	struct mut_stor_super_s super;
+typedef struct _stor_s {
+	struct mut_stor_s super;
 	struct tmln_s tmln;
 	struct ftmap_s live;
 	size_t ncache;
 	struct ftmap_s cache[64U];
-};
+} *_stor_t;
 
 /* one static stor for lazy lads */
-static struct mut_stor_s stor;
+static struct _stor_s stor;
 
 
 static inline int
@@ -164,25 +164,25 @@ DEFMIN(size_t);
 
 
 static inline __attribute__((nonnull(1), const, pure)) size_t
-trans_ntrans(const struct mut_stor_s *s)
+trans_ntrans(const struct _stor_s *s)
 {
 	return s->tmln.ntrans;
 }
 
 static inline __attribute__((nonnull(1))) echs_instant_t
-trans_get_trans(const struct mut_stor_s *s, mut_trans_t t)
+trans_get_trans(const struct _stor_s *s, mut_trans_t t)
 {
 	return s->tmln.trans[t];
 }
 
 static inline __attribute__((nonnull(1))) mut_oid_t
-trans_get_fact(const struct mut_stor_s *s, mut_trans_t t)
+trans_get_fact(const struct _stor_s *s, mut_trans_t t)
 {
 	return s->tmln.facts[t];
 }
 
 static inline __attribute__((nonnull(1))) echs_range_t
-trans_get_valid(const struct mut_stor_s *s, mut_trans_t t)
+trans_get_valid(const struct _stor_s *s, mut_trans_t t)
 {
 	return s->tmln.valids[t];
 }
@@ -316,7 +316,7 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 
 /* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
-_bitte_get_as_of_now(mut_stor_t s, mut_oid_t fact)
+_bitte_get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 	mut_trans_t t = _get_last_trans(&s->live, fact);
 
@@ -332,7 +332,7 @@ _bitte_get_as_of_now(mut_stor_t s, mut_oid_t fact)
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
-_bitte_get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
+_bitte_get(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 	mut_trans_t i_last_before = FACT_NOT_FOUND;
 	mut_trans_t i_first_after = FACT_NOT_FOUND;
@@ -380,7 +380,7 @@ _bitte_get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 }
 
 static __attribute__((nonnull(1))) size_t
-_bitte_rtr_as_of_now(mut_stor_t s, mut_oid_t *restrict fact, size_t nfact)
+_bitte_rtr_as_of_now(_stor_t s, mut_oid_t *restrict fact, size_t nfact)
 {
 /* current transaction time-slice, very naive */
 	const size_t n = min(size_t, nfact, s->live.nfacts);
@@ -393,7 +393,7 @@ _bitte_rtr_as_of_now(mut_stor_t s, mut_oid_t *restrict fact, size_t nfact)
 
 static __attribute__((nonnull(1))) size_t
 _bitte_rtr(
-	mut_stor_t s, mut_oid_t *restrict fact, size_t nfact,
+	_stor_t s, mut_oid_t *restrict fact, size_t nfact,
 	echs_instant_t as_of)
 {
 	/* cache index */
@@ -451,7 +451,7 @@ _bitte_rtr(
 }
 
 static __attribute__((nonnull(1))) echs_range_t
-_bitte_trend(const struct mut_stor_s *s, mut_trans_t t)
+_bitte_trend(const struct _stor_s *s, mut_trans_t t)
 {
 /* return the transaction interval for transaction T */
 	const mut_oid_t f = trans_get_fact(s, t);
@@ -479,7 +479,7 @@ _bitte_trend(const struct mut_stor_s *s, mut_trans_t t)
 
 static __attribute__((nonnull(1))) void
 _bitte_trends(
-	const struct mut_stor_s *s, echs_range_t *restrict tt,
+	const struct _stor_s *s, echs_range_t *restrict tt,
 	const mut_trans_t *t, size_t nt)
 {
 /* TRansaction ENDs, obtain offsets in OF find the transaction time range */
@@ -498,7 +498,7 @@ _open(const char *fn, int UNUSED(fl))
 {
 	if (fn == NULL) {
 		/* mem store they want, good */
-		return calloc(1, sizeof(struct mut_stor_s));
+		return calloc(1, sizeof(struct _stor_s));
 	}
 	return NULL;
 }
@@ -506,14 +506,16 @@ _open(const char *fn, int UNUSED(fl))
 static void
 _close(mut_stor_t s)
 {
-	if (s == NULL) {
+	_stor_t _s;
+
+	if ((_s = (_stor_t)s) == NULL) {
 		/* free static resources */
-		s = &stor;
+		_s = &stor;
 	}
-	tmln_free(&s->tmln);
-	ftmap_free(&s->live);
-	for (size_t i = 0U; i < s->ncache; i++) {
-		ftmap_free(s->cache + i);
+	tmln_free(&_s->tmln);
+	ftmap_free(&_s->live);
+	for (size_t i = 0U; i < _s->ncache; i++) {
+		ftmap_free(_s->cache + i);
 	}
 	return;
 }
@@ -521,26 +523,28 @@ _close(mut_stor_t s)
 static int
 _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 {
+	_stor_t _s;
+
 	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		return -1;
-	} else if (s == NULL) {
-		s = &stor;
+	} else if ((_s = (_stor_t)s) == NULL) {
+		_s = &stor;
 	}
 	/* check for resize */
-	if (UNLIKELY(!(s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&s->tmln, NTPB) < 0)) {
+	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
+		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
 			return -1;
 		}
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
-		const size_t it = s->tmln.ntrans++;
+		const size_t it = _s->tmln.ntrans++;
 
-		s->tmln.trans[it] = t;
-		s->tmln.facts[it] = fact;
-		s->tmln.valids[it] = valid;
+		_s->tmln.trans[it] = t;
+		_s->tmln.facts[it] = fact;
+		_s->tmln.valids[it] = valid;
 
-		_put_last_trans(&s->live, fact, t, it);
+		_put_last_trans(&_s->live, fact, t, it);
 	}
 	return 0;
 }
@@ -548,35 +552,38 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 static int
 _rem(mut_stor_t s, mut_oid_t fact)
 {
-	if (s == NULL) {
-		s = &stor;
+	_stor_t _s;
+
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
 
-	const mut_trans_t t = _get_last_trans(&s->live, fact);
+	const mut_trans_t t = _get_last_trans(&_s->live, fact);
 
 	if (FACT_NOT_FOUND_P(t)) {
 		/* he's dead already */
 		return -1;
-	} else if (echs_nul_range_p(trans_get_valid(s, t))) {
+	} else if (echs_nul_range_p(trans_get_valid(_s, t))) {
 		/* dead already, just */
 		return -1;
 	}
 	/* otherwise kill him */
 	/* check for resize */
-	if (UNLIKELY(!(s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&s->tmln, NTPB) < 0)) {
+	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
+		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
 			return -1;
 		}
 	}
 	/* stamp him off */
 	with (echs_instant_t now = echs_now()) {
-		const size_t it = s->tmln.ntrans++;
+		const size_t it = _s->tmln.ntrans++;
 
-		s->tmln.trans[it] = now;
-		s->tmln.facts[it] = fact;
-		s->tmln.valids[it] = echs_nul_range();
+		_s->tmln.trans[it] = now;
+		_s->tmln.facts[it] = fact;
+		_s->tmln.valids[it] = echs_nul_range();
 
-		_put_last_trans(&s->live, fact, now, it);
+		_put_last_trans(&_s->live, fact, now, it);
 	}
 	return 0;
 }
@@ -584,31 +591,37 @@ _rem(mut_stor_t s, mut_oid_t fact)
 static echs_bitmp_t
 _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
-	if (s == NULL) {
-		s = &stor;
+	_stor_t _s;
+
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
-	if (UNLIKELY(!s->tmln.ntrans || fact == MUT_NUL_OID)) {
+	if (UNLIKELY(!_s->tmln.ntrans || fact == MUT_NUL_OID)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if (echs_instant_le_p(s->live.trans, as_of)) {
-		return _bitte_get_as_of_now(s, fact);
+	else if (echs_instant_le_p(_s->live.trans, as_of)) {
+		return _bitte_get_as_of_now(_s, fact);
 	}
 	/* otherwise proceed to scan */
-	return _bitte_get(s, fact, as_of);
+	return _bitte_get(_s, fact, as_of);
 }
 
 static int
 _supersede(
 	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	if (s == NULL) {
-		s = &stor;
+	_stor_t _s;
+
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
 
-	const mut_trans_t ot = _get_last_trans(&s->live, old);
+	const mut_trans_t ot = _get_last_trans(&_s->live, old);
 
 	if (FACT_NOT_FOUND_P(ot)) {
 		/* must be dead, cannot supersede */
@@ -616,42 +629,42 @@ _supersede(
 	}
 
 	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(new && !((s->tmln.ntrans + 1U) % NTPB) ||
-		     !(s->tmln.ntrans % NTPB))) {
+	if (UNLIKELY(new && !((_s->tmln.ntrans + 1U) % NTPB) ||
+		     !(_s->tmln.ntrans % NTPB))) {
 		const size_t n = NTPB +
-			(new && !((s->tmln.ntrans + 1U) % NTPB));
+			(new && !((_s->tmln.ntrans + 1U) % NTPB));
 
-		if (UNLIKELY(tmln_resize(&s->tmln, n) < 0)) {
+		if (UNLIKELY(tmln_resize(&_s->tmln, n) < 0)) {
 			return -1;
 		}
 	}
 	/* atomically handle the supersedure */
 	with (echs_instant_t t = echs_now()) {
 		/* old guy first */
-		with (const size_t it = s->tmln.ntrans++) {
+		with (const size_t it = _s->tmln.ntrans++) {
 			/* build new validity */
 			echs_range_t nuv = {
-				.from = trans_get_valid(s, ot).from,
+				.from = trans_get_valid(_s, ot).from,
 				.till = valid.from,
 			};
 
 			/* bang to timeline */
-			s->tmln.trans[it] = t;
-			s->tmln.facts[it] = old;
-			s->tmln.valids[it] = nuv;
+			_s->tmln.trans[it] = t;
+			_s->tmln.facts[it] = old;
+			_s->tmln.valids[it] = nuv;
 
-			_put_last_trans(&s->live, old, t, it);
+			_put_last_trans(&_s->live, old, t, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
-			const size_t it = s->tmln.ntrans++;
+			const size_t it = _s->tmln.ntrans++;
 
 			/* bang to timeline */
-			s->tmln.trans[it] = t;
-			s->tmln.facts[it] = new;
-			s->tmln.valids[it] = valid;
+			_s->tmln.trans[it] = t;
+			_s->tmln.facts[it] = new;
+			_s->tmln.valids[it] = valid;
 
-			_put_last_trans(&s->live, new, t, it);
+			_put_last_trans(&_s->live, new, t, it);
 		}
 	}
 	return 0;
@@ -669,22 +682,24 @@ _rtr(
  * then we'll copy the actual fact oids and valids and transs */
 	bool currentp;
 	size_t res;
+	_stor_t _s;
 
-	if (s == NULL) {
-		s = &stor;
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
-	if (UNLIKELY(!trans_ntrans(s))) {
+	if (UNLIKELY(!trans_ntrans(_s))) {
 		/* no transactions in this store, trivial*/
 		return 0U;
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if ((currentp = echs_instant_le_p(s->live.trans, as_of))) {
-		res = _bitte_rtr_as_of_now(s, fact, nfact);
+	else if ((currentp = echs_instant_le_p(_s->live.trans, as_of))) {
+		res = _bitte_rtr_as_of_now(_s, fact, nfact);
 	}
 	/* otherwise just do it the hard way */
 	else {
-		res = _bitte_rtr(s, fact, nfact, as_of);
+		res = _bitte_rtr(_s, fact, nfact, as_of);
 	}
 
 	/* now we've got them offsets,
@@ -692,25 +707,25 @@ _rtr(
 	if (trans != NULL && currentp) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			trans[i] = ECHS_RANGE_FROM(trans_get_trans(s, o));
+			trans[i] = ECHS_RANGE_FROM(trans_get_trans(_s, o));
 		}
 	} else if (trans != NULL) {
 		/* cluster fuck, how do we know when trans[o] ends?
 		 * well, we scan again for any of the offsets in
 		 * FACT and find the next transaction and put it into
 		 * TRANS. */
-		_bitte_trends(s, trans, fact, res);
+		_bitte_trends(_s, trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			valid[i] = trans_get_valid(s, o);
+			valid[i] = trans_get_valid(_s, o);
 		}
 	}
 	/* ... and finally */
 	for (size_t i = 0U; i < res; i++) {
 		const size_t o = fact[i];
-		fact[i] = trans_get_fact(s, o);
+		fact[i] = trans_get_fact(_s, o);
 	}
 	return res;
 }
@@ -723,31 +738,33 @@ _scan(
 	echs_instant_t vtime)
 {
 	size_t res = 0U;
+	_stor_t _s;
 
-	if (s == NULL) {
-		s = &stor;
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
 
 	/* store offsets in FACT table first */
-	for (size_t i = 0U; i < trans_ntrans(s) && res < nfact; i++) {
-		if (echs_in_range_p(trans_get_valid(s, i), vtime)) {
+	for (size_t i = 0U; i < trans_ntrans(_s) && res < nfact; i++) {
+		if (echs_in_range_p(trans_get_valid(_s, i), vtime)) {
 			fact[res++] = i;
 		}
 	}
 	/* go through FACT table and bang real objects */
 	if (trans != NULL) {
-		_bitte_trends(s, trans, fact, res);
+		_bitte_trends(_s, trans, fact, res);
 	}
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = fact[i];
-			valid[i] = trans_get_valid(s, o);
+			valid[i] = trans_get_valid(_s, o);
 		}
 	}
 	/* ... and finally */
 	for (size_t i = 0U; i < res; i++) {
 		const size_t o = fact[i];
-		fact[i] = trans_get_fact(s, o);
+		fact[i] = trans_get_fact(_s, o);
 	}
 	return res;
 }
@@ -759,20 +776,22 @@ _hist(
 	echs_range_t *restrict valid, mut_oid_t fact)
 {
 	size_t res = 0U;
+	_stor_t _s;
 
-	if (s == NULL) {
-		s = &stor;
+	if ((_s = (_stor_t)s) == NULL) {
+		/* use static resources */
+		_s = &stor;
 	}
 
-	const mut_trans_t t1 = _get_first_trans(&s->live, fact);
+	const mut_trans_t t1 = _get_first_trans(&_s->live, fact);
 
 	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
 		/* if there's no last transaction, there can be no 1st either */
 		return 0U;
 	}
 	/* traverse the timeline and store offsets to transactions */
-	for (mut_trans_t i = t1; i < trans_ntrans(s) && res < ntrans; i++) {
-		if (fact == trans_get_fact(s, i)) {
+	for (mut_trans_t i = t1; i < trans_ntrans(_s) && res < ntrans; i++) {
+		if (fact == trans_get_fact(_s, i)) {
 			trans[res++].from.u = i;
 		}
 	}
@@ -780,7 +799,7 @@ _hist(
 	if (valid != NULL) {
 		for (size_t i = 0U; i < res; i++) {
 			const size_t o = trans[i].from.u;
-			valid[i] = s->tmln.valids[o];
+			valid[i] = _s->tmln.valids[o];
 		}
 	}
 
@@ -790,13 +809,13 @@ _hist(
 		const size_t ot = trans[i].from.u;
 
 		trans[i - 1U] = (echs_range_t){
-			s->tmln.trans[of], s->tmln.trans[ot]
+			_s->tmln.trans[of], _s->tmln.trans[ot]
 		};
 	}
 	/* last trans lasts forever */
 	if (res > 0U) {
 		const size_t o = trans[res - 1U].from.u;
-		trans[res - 1U] = ECHS_RANGE_FROM(s->tmln.trans[o]);
+		trans[res - 1U] = ECHS_RANGE_FROM(_s->tmln.trans[o]);
 	}
 	return res;
 }
