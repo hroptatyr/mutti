@@ -379,12 +379,65 @@ _rem(mut_stor_t s, mut_oid_t fact)
 	return 0;
 }
 
+static int
+_ssd(
+	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
+{
+	_stor_t _s = (_stor_t)s;
+	struct fact_s f = _get_fact(_s->ft, old);
+	struct trns_s last;
+
+	if (FACT_NOT_FOUND_P(f)) {
+		/* must be dead, cannot supersede */
+		return -1;
+	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
+		/* must be dead, cannot supersede */
+		return -1;
+	}
+	/* atomically handle the supersedure */
+	with (echs_instant_t now = echs_now()) {
+		/* old guy first */
+		DBT k = {NULL};
+		DBT v = {
+			.data = &(struct trns_s){
+				now, old,
+				/* new validity */
+				{last.valid.from, valid.from}
+			},
+			.size = sizeof(struct trns_s)
+		};
+
+		if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
+			return -1;
+		}
+
+		/* put fact mapping */
+		assert(k.size == sizeof(mut_tid_t));
+		_put_last_trans(_s->ft, old, *(mut_tid_t*)k.data);
+		/* place last trans stamp */
+		_s->trins = now;
+
+		/* new guy next */
+		if (new != MUT_NUL_OID) {
+			v.data = &(struct trns_s){now, new, valid};
+
+			if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
+				return -1;
+			}
+
+			_put_last_trans(_s->ft, new, *(mut_tid_t*)k.data);
+		}
+	}
+	return 0;
+}
+
 struct bitte_backend_s IN_DSO(backend) = {
 	.mut_stor_open_f = _open,
 	.mut_stor_close_f = _close,
 	.bitte_get_f = _get,
 	.bitte_put_f = _put,
 	.bitte_rem_f = _rem,
+	.bitte_supersede_f = _ssd,
 };
 
 /* bitte-bdb.c ends here */
