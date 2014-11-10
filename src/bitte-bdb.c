@@ -384,7 +384,7 @@ _ssd(
 	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
 	_stor_t _s = (_stor_t)s;
-	struct fact_s f = _get_fact(_s->ft, old);
+	const struct fact_s f = _get_fact(_s->ft, old);
 	struct trns_s last;
 
 	if (FACT_NOT_FOUND_P(f)) {
@@ -431,6 +431,56 @@ _ssd(
 	return 0;
 }
 
+static size_t
+_hist(
+	mut_stor_t s,
+	echs_range_t *restrict trans, size_t ntrans,
+	echs_range_t *restrict valid, mut_oid_t fact)
+{
+	_stor_t _s = (_stor_t)s;
+	const struct fact_s f = _get_fact(_s->ft, fact);
+	struct trns_s last;
+	size_t res = 0U;
+	DBC *c;
+
+	if (FACT_NOT_FOUND_P(f)) {
+		/* no last transaction, so no first either */
+		return 0U;
+	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
+		/* no last transaction, so no first either */
+		return 0U;
+	}
+	/* prep traversal */
+	if (_s->tr->cursor(_s->tr, NULL, &c, DB_CURSOR_BULK) < 0) {
+		return 0U;
+	}
+	/* traverse the timeline and store offsets to transactions */
+	for (DBT dbk = {}, dbv = {};
+	     c->get(c, &dbk, &dbv, DB_NEXT) == 0 && res < ntrans;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			break;
+		} else if (fact == t->fact) {
+			trans[res].from = t->trins;
+			if (LIKELY(res)) {
+				trans[res - 1U].till = t->trins;
+			}
+			if (valid != NULL) {
+				valid[res] = t->valid;
+			}
+
+			/* inc */
+			res++;
+		}
+	}
+	/* last trans lasts forever */
+	if (res > 0U) {
+		trans[res - 1U].till = ECHS_UNTIL_CHANGED;
+	}
+	return res;
+}
+
 struct bitte_backend_s IN_DSO(backend) = {
 	.mut_stor_open_f = _open,
 	.mut_stor_close_f = _close,
@@ -438,6 +488,7 @@ struct bitte_backend_s IN_DSO(backend) = {
 	.bitte_put_f = _put,
 	.bitte_rem_f = _rem,
 	.bitte_supersede_f = _ssd,
+	.bitte_hist_f = _hist,
 };
 
 /* bitte-bdb.c ends here */
