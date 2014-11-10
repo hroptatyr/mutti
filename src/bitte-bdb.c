@@ -167,7 +167,69 @@ _get_as_of_now(_stor_t _s, mut_oid_t fact)
 static echs_bitmp_t
 _get_as_of_then(_stor_t _s, mut_oid_t fact, echs_instant_t as_of)
 {
-	return ECHS_NUL_BITMP;
+	mut_tid_t i_last_before = TID_NOT_FOUND;
+	mut_tid_t i_first_after = TID_NOT_FOUND;
+	echs_bitmp_t res = ECHS_NUL_BITMP;
+	DBC *c;
+
+	if (_s->tr->cursor(_s->tr, NULL, &c, DB_CURSOR_BULK) < 0) {
+		return ECHS_NUL_BITMP;
+	}
+	for (DBT dbk = {}, dbv = {}; c->get(c, &dbk, &dbv, DB_NEXT) == 0;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			goto clo;
+		} else if (!echs_instant_le_p(t->trins, as_of)) {
+			c->get(c, &dbk, &dbv, DB_PREV);
+			break;
+		} else if (fact == t->fact) {
+			const mut_tid_t *tp = dbk.data;
+			i_last_before = *tp;
+		}
+	}
+	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
+	 * the last fiddle with FACT before AS_OF */
+	if (TID_NOT_FOUND_P(i_last_before)) {
+		goto clo;
+	}
+	/* keep scanning, because the fact might have been superseded by
+	 * a more recent transaction */
+	for (DBT dbk = {}, dbv = {}; c->get(c, &dbk, &dbv, DB_NEXT) == 0;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			goto clo;
+		} else if (fact == t->fact) {
+			const mut_tid_t *tp = dbk.data;
+			i_first_after = *tp;
+			break;
+		}
+	}
+	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
+	 * the next fiddle with FACT on or after AS_OF */
+	with (struct trns_s bef, aft) {
+		_get_tid(&bef, _s->tr, i_last_before);
+
+		if (TID_NOT_FOUND_P(i_first_after)) {
+			/* must be open-ended */
+			res = (echs_bitmp_t){
+				bef.valid,
+				ECHS_RANGE_FROM(bef.trins)
+			};
+			break;
+		}
+		/* otherwise also get the one afterwards */
+		_get_tid(&aft, _s->tr, i_first_after);
+		res = (echs_bitmp_t){
+			bef.valid,
+			(echs_range_t){bef.trins, aft.trins},
+		};
+	}
+
+clo:
+	c->close(c);
+	return res;
 }
 
 
