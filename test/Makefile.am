@@ -78,4 +78,8 @@ check_PROGRAMS += hist_01
 hist_01_LDADD = $(mutti_LIBS)
 cli_tests += hist_01.clit
 
+check_PROGRAMS += hist_bdb_01
+hist_bdb_01_LDADD = $(mutti_LIBS)
+cli_tests += hist_bdb_01.clit
+
 ## Makefile.am ends here
