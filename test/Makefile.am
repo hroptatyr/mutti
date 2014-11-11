@@ -46,6 +46,14 @@ check_PROGRAMS += addgetrem_bdb_01
 addgetrem_bdb_01_LDADD = $(mutti_LIBS)
 cli_tests += addgetrem_bdb_01.clit
 
+check_PROGRAMS += addgetrem_bdb_02
+addgetrem_bdb_02_LDADD = $(mutti_LIBS)
+cli_tests += addgetrem_bdb_02.clit
+
+check_PROGRAMS += addgetrem_bdb_03
+addgetrem_bdb_03_LDADD = $(mutti_LIBS)
+cli_tests += addgetrem_bdb_03.clit
+
 check_PROGRAMS += rtr_01
 rtr_01_LDADD = $(mutti_LIBS)
 cli_tests += rtr_01.clit
@@ -69,5 +77,9 @@ cli_tests += scan_02.clit
 check_PROGRAMS += hist_01
 hist_01_LDADD = $(mutti_LIBS)
 cli_tests += hist_01.clit
+
+check_PROGRAMS += hist_bdb_01
+hist_bdb_01_LDADD = $(mutti_LIBS)
+cli_tests += hist_bdb_01.clit
 
 ## Makefile.am ends here

@@ -167,7 +167,69 @@ _get_as_of_now(_stor_t _s, mut_oid_t fact)
 static echs_bitmp_t
 _get_as_of_then(_stor_t _s, mut_oid_t fact, echs_instant_t as_of)
 {
-	return ECHS_NUL_BITMP;
+	mut_tid_t i_last_before = TID_NOT_FOUND;
+	mut_tid_t i_first_after = TID_NOT_FOUND;
+	echs_bitmp_t res = ECHS_NUL_BITMP;
+	DBC *c;
+
+	if (_s->tr->cursor(_s->tr, NULL, &c, DB_CURSOR_BULK) < 0) {
+		return ECHS_NUL_BITMP;
+	}
+	for (DBT dbk = {}, dbv = {}; c->get(c, &dbk, &dbv, DB_NEXT) == 0;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			goto clo;
+		} else if (!echs_instant_le_p(t->trins, as_of)) {
+			c->get(c, &dbk, &dbv, DB_PREV);
+			break;
+		} else if (fact == t->fact) {
+			const mut_tid_t *tp = dbk.data;
+			i_last_before = *tp;
+		}
+	}
+	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
+	 * the last fiddle with FACT before AS_OF */
+	if (TID_NOT_FOUND_P(i_last_before)) {
+		goto clo;
+	}
+	/* keep scanning, because the fact might have been superseded by
+	 * a more recent transaction */
+	for (DBT dbk = {}, dbv = {}; c->get(c, &dbk, &dbv, DB_NEXT) == 0;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			goto clo;
+		} else if (fact == t->fact) {
+			const mut_tid_t *tp = dbk.data;
+			i_first_after = *tp;
+			break;
+		}
+	}
+	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
+	 * the next fiddle with FACT on or after AS_OF */
+	with (struct trns_s bef, aft) {
+		_get_tid(&bef, _s->tr, i_last_before);
+
+		if (TID_NOT_FOUND_P(i_first_after)) {
+			/* must be open-ended */
+			res = (echs_bitmp_t){
+				bef.valid,
+				ECHS_RANGE_FROM(bef.trins)
+			};
+			break;
+		}
+		/* otherwise also get the one afterwards */
+		_get_tid(&aft, _s->tr, i_first_after);
+		res = (echs_bitmp_t){
+			bef.valid,
+			(echs_range_t){bef.trins, aft.trins},
+		};
+	}
+
+clo:
+	c->close(c);
+	return res;
 }
 
 
@@ -317,12 +379,116 @@ _rem(mut_stor_t s, mut_oid_t fact)
 	return 0;
 }
 
+static int
+_ssd(
+	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
+{
+	_stor_t _s = (_stor_t)s;
+	const struct fact_s f = _get_fact(_s->ft, old);
+	struct trns_s last;
+
+	if (FACT_NOT_FOUND_P(f)) {
+		/* must be dead, cannot supersede */
+		return -1;
+	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
+		/* must be dead, cannot supersede */
+		return -1;
+	}
+	/* atomically handle the supersedure */
+	with (echs_instant_t now = echs_now()) {
+		/* old guy first */
+		DBT k = {NULL};
+		DBT v = {
+			.data = &(struct trns_s){
+				now, old,
+				/* new validity */
+				{last.valid.from, valid.from}
+			},
+			.size = sizeof(struct trns_s)
+		};
+
+		if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
+			return -1;
+		}
+
+		/* put fact mapping */
+		assert(k.size == sizeof(mut_tid_t));
+		_put_last_trans(_s->ft, old, *(mut_tid_t*)k.data);
+		/* place last trans stamp */
+		_s->trins = now;
+
+		/* new guy next */
+		if (new != MUT_NUL_OID) {
+			v.data = &(struct trns_s){now, new, valid};
+
+			if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
+				return -1;
+			}
+
+			_put_last_trans(_s->ft, new, *(mut_tid_t*)k.data);
+		}
+	}
+	return 0;
+}
+
+static size_t
+_hist(
+	mut_stor_t s,
+	echs_range_t *restrict trans, size_t ntrans,
+	echs_range_t *restrict valid, mut_oid_t fact)
+{
+	_stor_t _s = (_stor_t)s;
+	const struct fact_s f = _get_fact(_s->ft, fact);
+	struct trns_s last;
+	size_t res = 0U;
+	DBC *c;
+
+	if (FACT_NOT_FOUND_P(f)) {
+		/* no last transaction, so no first either */
+		return 0U;
+	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
+		/* no last transaction, so no first either */
+		return 0U;
+	}
+	/* prep traversal */
+	if (_s->tr->cursor(_s->tr, NULL, &c, DB_CURSOR_BULK) < 0) {
+		return 0U;
+	}
+	/* traverse the timeline and store offsets to transactions */
+	for (DBT dbk = {}, dbv = {};
+	     c->get(c, &dbk, &dbv, DB_NEXT) == 0 && res < ntrans;) {
+		const struct trns_s *const t = dbv.data;
+
+		if (UNLIKELY(dbv.size != sizeof(*t))) {
+			break;
+		} else if (fact == t->fact) {
+			trans[res].from = t->trins;
+			if (LIKELY(res)) {
+				trans[res - 1U].till = t->trins;
+			}
+			if (valid != NULL) {
+				valid[res] = t->valid;
+			}
+
+			/* inc */
+			res++;
+		}
+	}
+	/* last trans lasts forever */
+	if (res > 0U) {
+		trans[res - 1U].till = ECHS_UNTIL_CHANGED;
+	}
+	return res;
+}
+
 struct bitte_backend_s IN_DSO(backend) = {
 	.mut_stor_open_f = _open,
 	.mut_stor_close_f = _close,
 	.bitte_get_f = _get,
 	.bitte_put_f = _put,
 	.bitte_rem_f = _rem,
+	.bitte_supersede_f = _ssd,
+	.bitte_hist_f = _hist,
 };
 
 /* bitte-bdb.c ends here */
