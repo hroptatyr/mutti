@@ -238,15 +238,15 @@ _open(const char *fn, int UNUSED(fl))
 {
 	static const char fn2[] = ".2ndary.db";
 	uint32_t flags = 0U;
-	DB *ft;
-	DB *tr;
+	DB *ft = NULL;
+	DB *tr = NULL;
 	_stor_t s;
 
 	if (UNLIKELY(fn == NULL)) {
 		return NULL;
-	} else if (db_create(&tr, NULL, 0) < 0) {
+	} else if (db_create(&tr, NULL, 0) < 0 || tr == NULL) {
 		return NULL;
-	} else if (db_create(&ft, NULL, 0) < 0) {
+	} else if (db_create(&ft, NULL, 0) < 0 || ft == NULL) {
 		goto clo_prim;
 	}
 
