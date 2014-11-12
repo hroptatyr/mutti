@@ -290,7 +290,7 @@ ftmap_rsz(struct ftmap_s *m)
 	return 0;
 }
 
-static inline __attribute__((const)) size_t
+static inline __attribute__((pure)) size_t
 ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 {
 /* this is the offset getting routine
