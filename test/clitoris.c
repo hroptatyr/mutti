@@ -916,8 +916,8 @@ xpnder(clit_bit_t exp, int expfd)
 static pid_t
 differ(struct clit_chld_s ctx[static 1], clit_bit_t exp, bool xpnd_proto_p)
 {
-	char *expfn;
-	char *actfn;
+	char *expfn = NULL;
+	char *actfn = NULL;
 	pid_t difftool = -1;
 
 	assert(!clit_bit_fd_p(exp));
@@ -1137,6 +1137,31 @@ init_tst(struct clit_chld_s ctx[static 1], struct clit_tst_s tst[static 1])
 	return 0;
 }
 
+static struct {
+	sig_t old_hdl;
+	pid_t feed;
+	pid_t diff;
+} alrm_handler_closure;
+
+static void
+alrm_handler(int signum)
+{
+	assert(signum == SIGALRM);
+	if (alrm_handler_closure.feed > 0) {
+		kill(alrm_handler_closure.feed, SIGALRM);
+	}
+	if (alrm_handler_closure.diff > 0) {
+		kill(alrm_handler_closure.diff, SIGALRM);
+	}
+	signal(SIGALRM, alrm_handler_closure.old_hdl);
+	with (pid_t self = getpid()) {
+		if (LIKELY(self > 0)) {
+			kill(self, SIGALRM);
+		}
+	}
+	return;
+}
+
 static int
 run_tst(struct clit_chld_s ctx[static 1], struct clit_tst_s tst[static 1])
 {
@@ -1152,6 +1177,9 @@ run_tst(struct clit_chld_s ctx[static 1], struct clit_tst_s tst[static 1])
 			kill(ctx->diff, SIGTERM);
 		}
 		goto wait;
+	}
+	if (ctx->options.timeo > 0 && (ctx->feed > 0 || ctx->diff > 0)) {
+		alrm_handler_closure.old_hdl = signal(SIGALRM, alrm_handler);
 	}
 	with (const char *p = tst->cmd.d, *const ep = tst->cmd.d + tst->cmd.z) {
 		for (ssize_t nwr;
@@ -1236,6 +1264,9 @@ wait:
 		close(ctx->per);
 	}
 #endif	/* HAVE_PTY_H */
+	if (ctx->options.timeo > 0 && (ctx->feed > 0 || ctx->diff > 0)) {
+		signal(SIGALRM, alrm_handler_closure.old_hdl);
+	}
 	return rc;
 }
 
