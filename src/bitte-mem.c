@@ -253,17 +253,18 @@ ftmap_rsz(struct ftmap_s *m)
 
 		/* rehash */
 		FTMAP_FOREACH(i, m) {
-			size_t o;
+			size_t o = m->facts[i] & (nu - 1ULL);
+			const size_t eo = o + (1ULL << FTMAP_LEAST);
 
 			/* loop */
-			for (o = m->facts[i] & (nu - 1ULL); o < nu; o++) {
+			for (; o < eo; o++) {
 				if (!pf[o]) {
 					pf[o] = m->facts[i];
 					ps[o] = m->span[i];
 					break;
 				}
 			}
-			if (UNLIKELY(o == nu)) {
+			if (UNLIKELY(o == eo)) {
 				/* grml */
 				abort();
 			}
