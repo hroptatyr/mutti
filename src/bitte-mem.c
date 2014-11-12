@@ -586,11 +586,6 @@ _open(const char *fn, int UNUSED(fl))
 	if (init_ftmap(&res->live) < 0) {
 		goto fucked;
 	}
-	for (size_t i = 0U; i < countof(res->cache); i++) {
-		if (init_ftmap(res->cache + i) < 0) {
-			goto fucked;
-		}
-	}
 	return (mut_stor_t)res;
 fucked:
 	free(res);
@@ -608,7 +603,7 @@ _close(mut_stor_t s)
 	}
 	tmln_free(&_s->tmln);
 	fini_ftmap(&_s->live);
-	for (size_t i = 0U; i < countof(_s->cache); i++) {
+	for (size_t i = 0U; i < _s->ncache; i++) {
 		fini_ftmap(_s->cache + i);
 	}
 	if (s != NULL) {
