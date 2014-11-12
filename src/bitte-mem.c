@@ -238,6 +238,9 @@ static int
 ftmap_rsz(struct ftmap_s *m)
 {
 /* extend by doubling the hash array, no rehashing will take place */
+	if (UNLIKELY(!m->zfacts)) {
+		return init_ftmap(m);
+	}
 	const size_t ol = 1ULL << m->zfacts;
 	const size_t nu = 1ULL << ++m->zfacts;
 	void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
