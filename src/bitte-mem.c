@@ -48,7 +48,7 @@
 #include "nifty.h"
 
 /* at the moment we operate on 4k block sizes */
-#define BLKZ	(4096U)
+#define BLKZ	(64U * 4096U)
 /* number of transaction stamps per block */
 #define NTPB	(BLKZ / sizeof(echs_instant_t))
 
