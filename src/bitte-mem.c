@@ -80,8 +80,11 @@ typedef struct ftmap_s {
 	mut_tid_t *last;
 } *ftmap_t;
 
-#define FACT_NOT_FOUND		((mut_tid_t)-1)
-#define FACT_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
+#define TID_NOT_FOUND		((mut_tid_t)-1)
+#define TID_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
+
+#define FACT_NOT_FOUND		((struct ftnd_s){TID_NOT_FOUND})
+#define FACT_NOT_FOUND_P(x)	(TID_NOT_FOUND_P((x)._1st))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
@@ -320,7 +323,7 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 	mut_tid_t t = _get_last_trans(&s->live, fact);
 
-	if (FACT_NOT_FOUND_P(t)) {
+	if (TID_NOT_FOUND_P(t)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -334,8 +337,8 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
-	mut_tid_t i_last_before = FACT_NOT_FOUND;
-	mut_tid_t i_first_after = FACT_NOT_FOUND;
+	mut_tid_t i_last_before = TID_NOT_FOUND;
+	mut_tid_t i_first_after = TID_NOT_FOUND;
 	mut_tid_t i = 0U;
 
 	for (; i < _stor_ntrans(s) &&
@@ -346,7 +349,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
 	 * the last fiddle with FACT before AS_OF */
-	if (FACT_NOT_FOUND_P(i_last_before)) {
+	if (TID_NOT_FOUND_P(i_last_before)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -360,7 +363,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
 	 * the next fiddle with FACT on or after AS_OF */
-	if (FACT_NOT_FOUND_P(i_first_after)) {
+	if (TID_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
 			_stor_get_valid(s, i_last_before),
@@ -458,7 +461,7 @@ _bitte_trend(const struct _stor_s *s, mut_tid_t t)
 	const mut_tid_t hi = _get_last_trans(&s->live, f);
 	echs_range_t res;
 
-	assert(!FACT_NOT_FOUND_P(hi));
+	assert(!TID_NOT_FOUND_P(hi));
 	if (hi == t) {
 		/* this transaction is still current, i.e. open-ended */
 		return ECHS_RANGE_FROM(_stor_get_trans(s, t));
@@ -564,7 +567,7 @@ _rem(mut_stor_t s, mut_oid_t fact)
 
 	const mut_tid_t t = _get_last_trans(&_s->live, fact);
 
-	if (FACT_NOT_FOUND_P(t)) {
+	if (TID_NOT_FOUND_P(t)) {
 		/* he's dead already */
 		return -1;
 	} else if (echs_nul_range_p(_stor_get_valid(_s, t))) {
@@ -626,7 +629,7 @@ _supersede(
 
 	const mut_tid_t ot = _get_last_trans(&_s->live, old);
 
-	if (FACT_NOT_FOUND_P(ot)) {
+	if (TID_NOT_FOUND_P(ot)) {
 		/* must be dead, cannot supersede */
 		return -1;
 	}
@@ -788,7 +791,7 @@ _hist(
 
 	const mut_tid_t t1 = _get_first_trans(&_s->live, fact);
 
-	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
+	if (UNLIKELY(TID_NOT_FOUND_P(t1))) {
 		/* if there's no last transaction, there can be no 1st either */
 		return 0U;
 	}
