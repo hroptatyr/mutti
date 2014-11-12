@@ -354,7 +354,7 @@ ftmap_get_first(const struct ftmap_s *m, mut_oid_t fact)
 	if (UNLIKELY(FACT_NOT_FOUND_P(f))) {
 		return TID_NOT_FOUND;
 	}
-	return f.last;
+	return f._1st;
 }
 
 static int
