@@ -82,4 +82,11 @@ check_PROGRAMS += hist_bdb_01
 hist_bdb_01_LDADD = $(mutti_LIBS)
 cli_tests += hist_bdb_01.clit
 
+check_PROGRAMS += rolf-pump
+rolf_pump_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
+rolf_pump_LDADD = $(mutti_LIBS)
+check_PROGRAMS += rolf-pump-bdb
+rolf_pump_bdb_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
+rolf_pump_bdb_LDADD = $(mutti_LIBS)
+
 ## Makefile.am ends here

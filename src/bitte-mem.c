@@ -48,7 +48,7 @@
 #include "nifty.h"
 
 /* at the moment we operate on 4k block sizes */
-#define BLKZ	(4096U)
+#define BLKZ	(64U * 4096U)
 /* number of transaction stamps per block */
 #define NTPB	(BLKZ / sizeof(echs_instant_t))
 
@@ -71,17 +71,26 @@ struct tmln_s {
 	echs_range_t *valids;
 };
 
+/* fact nodes */
+struct ftnd_s {
+	mut_tid_t _1st;
+	mut_tid_t last;
+};
+
 /* fact offsets into the timeline */
 typedef struct ftmap_s {
 	size_t nfacts;
+	size_t zfacts;
 	echs_instant_t trans;
 	mut_oid_t *facts;
-	mut_tid_t *_1st;
-	mut_tid_t *last;
+	struct ftnd_s *span;
 } *ftmap_t;
 
-#define FACT_NOT_FOUND		((mut_tid_t)-1)
-#define FACT_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
+#define TID_NOT_FOUND		((mut_tid_t)-1)
+#define TID_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
+
+#define FACT_NOT_FOUND		((struct ftnd_s){TID_NOT_FOUND})
+#define FACT_NOT_FOUND_P(x)	(TID_NOT_FOUND_P((x)._1st))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
@@ -188,84 +197,192 @@ _stor_get_valid(const struct _stor_s *s, mut_tid_t t)
 }
 
 
-static __attribute__((nonnull(1))) mut_tid_t
-_get_last_trans(const struct ftmap_s *m, mut_oid_t fact)
-{
-	for (size_t i = 0U; i < m->nfacts; i++) {
-		if (m->facts[i] == fact) {
-			return m->last[i];
-		}
-	}
-	return FACT_NOT_FOUND;
-	
-}
-
-static __attribute__((nonnull(1))) mut_tid_t
-_get_first_trans(const struct ftmap_s *m, mut_oid_t fact)
-{
-	for (size_t i = 0U; i < m->nfacts; i++) {
-		if (m->facts[i] == fact) {
-			return m->_1st[i];
-		}
-	}
-	return FACT_NOT_FOUND;
-}
+/* ftmap fiddling */
+#define FTMAP_FOREACH(var, map)			\
+	for (size_t var = 0U; var < (1ULL << (map)->zfacts); var++)	\
+		if ((map)->facts[var])
 
 static int
-_put_last_trans(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
+init_ftmap(ftmap_t m)
 {
-	size_t i;
+#define FTMAP_LEAST	(6U)
+	assert(m->nfacts == 0U);
+	assert(m->zfacts == 0U);
+	assert(m->facts == NULL);
+	assert(m->span == NULL);
 
-	for (i = 0U; i < m->nfacts; i++) {
-		if (m->facts[i] == fact) {
-			/* just update him then */
-			goto up_and_out;
-		}
-	}
-	/* we'll have to extend the list of live facts */
-	if (UNLIKELY((m->nfacts % NTPB) == 0U)) {
-		const size_t ol = m->nfacts;
-		const size_t nu = ol + NTPB;
-		void *pi = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
-		void *po = xzfalloc(m->last, ol, nu, sizeof(*m->last));
-		void *p1 = xzfalloc(m->_1st, ol, nu, sizeof(*m->_1st));
-
-		if (UNLIKELY(pi == NULL || po == NULL || p1 == NULL)) {
-			/* brill */
-			return -1;
-		}
-		m->facts = pi;
-		m->last = po;
-		m->_1st = p1;
-	}
-	/* just ass our fact */
-	m->nfacts++;
-	m->facts[i] = fact;
-	m->_1st[i] = last;
-up_and_out:
-	m->trans = t;
-	m->last[i] = last;
-	return 0;
+	m->zfacts = FTMAP_LEAST;
+	m->facts = xzfalloc(NULL, 0U, (1ULL << m->zfacts), sizeof(*m->facts));
+	m->span = xzfalloc(NULL, 0U, (1ULL << m->zfacts), sizeof(*m->span));
+	return (m->facts != NULL && m->span != NULL) - 1;
 }
 
 static void
-ftmap_free(ftmap_t m)
+fini_ftmap(ftmap_t m)
 {
-	const size_t nf = m->nfacts;
-
-	if (UNLIKELY(nf == 0U)) {
+	if (UNLIKELY(m->zfacts < FTMAP_LEAST)) {
 		assert(m->facts == NULL);
-		assert(m->last == NULL);
-		assert(m->_1st == NULL);
+		assert(m->span == NULL);
 		return;
 	}
 	/* free these guys */
-	xfree(m->facts, nf * sizeof(*m->facts));
-	xfree(m->last, nf * sizeof(*m->last));
-	xfree(m->_1st, nf * sizeof(*m->_1st));
+	const size_t zf = 1ULL << m->zfacts;
+	xfree(m->facts, zf * sizeof(*m->facts));
+	xfree(m->span, zf * sizeof(*m->span));
 	/* complete wipe out */
 	memset(m, 0, sizeof(*m));
 	return;
+}
+
+static int
+ftmap_rsz(struct ftmap_s *m)
+{
+/* extend by doubling the hash array, no rehashing will take place */
+	if (UNLIKELY(!m->zfacts)) {
+		return init_ftmap(m);
+	} else if ((m->zfacts + 1U) / FTMAP_LEAST != m->zfacts / FTMAP_LEAST) {
+		/* rehash */
+		const size_t nu = 1ULL << (m->zfacts + 1U);
+		mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
+		struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
+
+		if (UNLIKELY(pf == NULL || ps == NULL)) {
+			/* brill */
+			return -1;
+		}
+
+		/* rehash */
+		FTMAP_FOREACH(i, m) {
+			size_t o = m->facts[i] & (nu - 1ULL);
+			const size_t eo = o + (1ULL << FTMAP_LEAST);
+
+			/* loop */
+			for (; o < eo; o++) {
+				if (!pf[o]) {
+					pf[o] = m->facts[i];
+					ps[o] = m->span[i];
+					break;
+				}
+			}
+			if (UNLIKELY(o == eo)) {
+				/* grml */
+				abort();
+			}
+		}
+
+		m->zfacts++;
+		m->facts = pf;
+		m->span = ps;
+	} else {
+		/* no rehashing */
+		const size_t ol = 1ULL << m->zfacts;
+		const size_t nu = 1ULL << ++m->zfacts;
+		void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
+		void *ps = xzfalloc(m->span, ol, nu, sizeof(*m->span));
+
+		if (UNLIKELY(pf == NULL || ps == NULL)) {
+			/* brill */
+			return -1;
+		}
+		m->facts = pf;
+		m->span = ps;
+	}
+	return 0;
+}
+
+static inline __attribute__((const)) size_t
+ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
+{
+/* this is the offset getting routine
+ * we'll check fact mod every 2-power up until m->zfacts
+ * and slots right thereof */
+	size_t i = (m->zfacts / FTMAP_LEAST) * FTMAP_LEAST;
+
+	if (UNLIKELY(!i)) {
+		goto out;
+	}
+	for (; i <= m->zfacts; i++) {
+		const size_t z = (1ULL << i);
+
+		/* just loop through him */
+		for (size_t o = fact & (z - 1ULL),
+			     eo = o + (1ULL << FTMAP_LEAST); o < eo; o++) {
+			if (!m->facts[o] || m->facts[o] == fact) {
+				return o;
+			}
+		}
+		/* getting here means o == 2^z, try the next 2-power
+		 * iff fact > 2^z */
+		if (UNLIKELY(fact < z)) {
+			abort();
+		}
+	}
+out:
+	return (size_t)-1;
+}
+
+static __attribute__((nonnull(1))) struct ftnd_s
+ftmap_get(const struct ftmap_s *m, mut_oid_t fact)
+{
+	/* hash fact */
+	const size_t o = ftmap_off(m, fact);
+
+	/* now either o >= 2^m->zfacts or m->facts[o] == 0U
+	 * or we've found him */
+	if (UNLIKELY(o >= (1ULL << m->zfacts) || !m->facts[o])) {
+		return FACT_NOT_FOUND;
+	}
+	return m->span[o];
+}
+
+static __attribute__((nonnull(1), flatten)) mut_tid_t
+ftmap_get_last(const struct ftmap_s *m, mut_oid_t fact)
+{
+	const struct ftnd_s f = ftmap_get(m, fact);
+
+	if (UNLIKELY(FACT_NOT_FOUND_P(f))) {
+		return TID_NOT_FOUND;
+	}
+	return f.last;
+}
+
+static __attribute__((nonnull(1), flatten)) mut_tid_t
+ftmap_get_first(const struct ftmap_s *m, mut_oid_t fact)
+{
+	const struct ftnd_s f = ftmap_get(m, fact);
+
+	if (UNLIKELY(FACT_NOT_FOUND_P(f))) {
+		return TID_NOT_FOUND;
+	}
+	return f._1st;
+}
+
+static int
+ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
+{
+	/* hash fact */
+	size_t o = ftmap_off(m, fact);
+
+	if (UNLIKELY(o >= (1ULL << m->zfacts))) {
+		if (UNLIKELY(ftmap_rsz(m) < 0)) {
+			/* fuck */
+			return -1;
+		} else if ((o = ftmap_off(m, fact)) >= (1ULL << m->zfacts)) {
+			/* big big fuck */
+			return -1;
+		}
+	} else if (LIKELY(m->facts[o] == fact)) {
+		/* just update him then */
+		goto up_and_out;
+	}
+	/* otherwise reuse the slot at hand then */
+	m->nfacts++;
+	m->facts[o] = fact;
+	m->span[o]._1st = last;
+up_and_out:
+	m->span[o].last = last;
+	m->trans = t;
+	return 0;
 }
 
 
@@ -318,9 +435,9 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
-	mut_tid_t t = _get_last_trans(&s->live, fact);
+	mut_tid_t t = ftmap_get_last(&s->live, fact);
 
-	if (FACT_NOT_FOUND_P(t)) {
+	if (TID_NOT_FOUND_P(t)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -334,8 +451,8 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
-	mut_tid_t i_last_before = FACT_NOT_FOUND;
-	mut_tid_t i_first_after = FACT_NOT_FOUND;
+	mut_tid_t i_last_before = TID_NOT_FOUND;
+	mut_tid_t i_first_after = TID_NOT_FOUND;
 	mut_tid_t i = 0U;
 
 	for (; i < _stor_ntrans(s) &&
@@ -346,7 +463,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
 	 * the last fiddle with FACT before AS_OF */
-	if (FACT_NOT_FOUND_P(i_last_before)) {
+	if (TID_NOT_FOUND_P(i_last_before)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
@@ -360,7 +477,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	}
 	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
 	 * the next fiddle with FACT on or after AS_OF */
-	if (FACT_NOT_FOUND_P(i_first_after)) {
+	if (TID_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
 			_stor_get_valid(s, i_last_before),
@@ -383,12 +500,15 @@ static __attribute__((nonnull(1))) size_t
 _bitte_rtr_as_of_now(_stor_t s, mut_oid_t *restrict fact, size_t nfact)
 {
 /* current transaction time-slice, very naive */
-	const size_t n = min(size_t, nfact, s->live.nfacts);
+	size_t res = 0U;
 
-	for (size_t i = 0U; i < n; i++) {
-		fact[i] = (mut_oid_t)s->live.last[i];
+	FTMAP_FOREACH(i, &s->live) {
+		fact[res++] = (mut_oid_t)s->live.span[i].last;
+		if (UNLIKELY(res >= nfact)) {
+			break;
+		}
 	}
-	return n;
+	return res;
 }
 
 static __attribute__((nonnull(1))) size_t
@@ -400,6 +520,7 @@ _bitte_rtr(
 	size_t ci;
 	/* timeline index */
 	mut_tid_t ti = 0U;
+	size_t res = 0U;
 
 	/* try caches */
 	for (ci = 0U; ci < s->ncache; ci++) {
@@ -413,9 +534,9 @@ _bitte_rtr(
 		/* yay, found a cache we can evolve,
 		 * find highest offset into trans so we know where to
 		 * start scanning */
-		for (size_t i = 0U; i < s->cache[ci].nfacts; i++) {
-			if (s->cache[ci].last[i] > ti) {
-				ti = s->cache[ci].last[i];
+		FTMAP_FOREACH(i, s->cache + ci) {
+			if (s->cache[ci].span[i].last > ti) {
+				ti = s->cache[ci].span[i].last;
 			}
 		}
 		/* we can start a bit later since the TI-th offset is covered */
@@ -438,16 +559,17 @@ _bitte_rtr(
 		     (t = _stor_get_trans(s, ti), echs_instant_le_p(t, as_of));
 	     ti++) {
 		const mut_oid_t f = _stor_get_fact(s, ti);
-		_put_last_trans(s->cache + ci, f, t, ti);
+		ftmap_put_last(s->cache + ci, f, t, ti);
 	}
 
 	/* same as _bitte_rtr_as_of_now() now */
-	const size_t n = min(size_t, nfact, s->cache[ci].nfacts);
-
-	for (size_t i = 0U; i < n; i++) {
-		fact[i] = (mut_oid_t)s->cache[ci].last[i];
+	FTMAP_FOREACH(i, s->cache + ci) {
+		fact[res++] = (mut_oid_t)s->cache[ci].span[i].last;
+		if (UNLIKELY(res >= nfact)) {
+			break;
+		}
 	}
-	return n;
+	return res;
 }
 
 static __attribute__((nonnull(1))) echs_range_t
@@ -455,10 +577,10 @@ _bitte_trend(const struct _stor_s *s, mut_tid_t t)
 {
 /* return the transaction interval for transaction T */
 	const mut_oid_t f = _stor_get_fact(s, t);
-	const mut_tid_t hi = _get_last_trans(&s->live, f);
+	const mut_tid_t hi = ftmap_get_last(&s->live, f);
 	echs_range_t res;
 
-	assert(!FACT_NOT_FOUND_P(hi));
+	assert(!TID_NOT_FOUND_P(hi));
 	if (hi == t) {
 		/* this transaction is still current, i.e. open-ended */
 		return ECHS_RANGE_FROM(_stor_get_trans(s, t));
@@ -496,10 +618,19 @@ _bitte_trends(
 static mut_stor_t
 _open(const char *fn, int UNUSED(fl))
 {
-	if (fn == NULL) {
-		/* mem store they want, good */
-		return calloc(1, sizeof(struct _stor_s));
+	struct _stor_s *res;
+
+	if (fn != NULL) {
+		return NULL;
 	}
+	/* mem store they want, good */
+	res = calloc(1, sizeof(struct _stor_s));
+	if (init_ftmap(&res->live) < 0) {
+		goto fucked;
+	}
+	return (mut_stor_t)res;
+fucked:
+	free(res);
 	return NULL;
 }
 
@@ -513,9 +644,9 @@ _close(mut_stor_t s)
 		_s = &stor;
 	}
 	tmln_free(&_s->tmln);
-	ftmap_free(&_s->live);
+	fini_ftmap(&_s->live);
 	for (size_t i = 0U; i < _s->ncache; i++) {
-		ftmap_free(_s->cache + i);
+		fini_ftmap(_s->cache + i);
 	}
 	if (s != NULL) {
 		free(_s);
@@ -547,7 +678,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->tmln.facts[it] = fact;
 		_s->tmln.valids[it] = valid;
 
-		_put_last_trans(&_s->live, fact, t, it);
+		ftmap_put_last(&_s->live, fact, t, it);
 	}
 	return 0;
 }
@@ -562,9 +693,9 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s = &stor;
 	}
 
-	const mut_tid_t t = _get_last_trans(&_s->live, fact);
+	const mut_tid_t t = ftmap_get_last(&_s->live, fact);
 
-	if (FACT_NOT_FOUND_P(t)) {
+	if (TID_NOT_FOUND_P(t)) {
 		/* he's dead already */
 		return -1;
 	} else if (echs_nul_range_p(_stor_get_valid(_s, t))) {
@@ -586,7 +717,7 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s->tmln.facts[it] = fact;
 		_s->tmln.valids[it] = echs_nul_range();
 
-		_put_last_trans(&_s->live, fact, now, it);
+		ftmap_put_last(&_s->live, fact, now, it);
 	}
 	return 0;
 }
@@ -624,9 +755,9 @@ _supersede(
 		_s = &stor;
 	}
 
-	const mut_tid_t ot = _get_last_trans(&_s->live, old);
+	const mut_tid_t ot = ftmap_get_last(&_s->live, old);
 
-	if (FACT_NOT_FOUND_P(ot)) {
+	if (TID_NOT_FOUND_P(ot)) {
 		/* must be dead, cannot supersede */
 		return -1;
 	}
@@ -656,7 +787,7 @@ _supersede(
 			_s->tmln.facts[it] = old;
 			_s->tmln.valids[it] = nuv;
 
-			_put_last_trans(&_s->live, old, t, it);
+			ftmap_put_last(&_s->live, old, t, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
@@ -667,7 +798,7 @@ _supersede(
 			_s->tmln.facts[it] = new;
 			_s->tmln.valids[it] = valid;
 
-			_put_last_trans(&_s->live, new, t, it);
+			ftmap_put_last(&_s->live, new, t, it);
 		}
 	}
 	return 0;
@@ -786,9 +917,9 @@ _hist(
 		_s = &stor;
 	}
 
-	const mut_tid_t t1 = _get_first_trans(&_s->live, fact);
+	const mut_tid_t t1 = ftmap_get_first(&_s->live, fact);
 
-	if (UNLIKELY(FACT_NOT_FOUND_P(t1))) {
+	if (UNLIKELY(TID_NOT_FOUND_P(t1))) {
 		/* if there's no last transaction, there can be no 1st either */
 		return 0U;
 	}

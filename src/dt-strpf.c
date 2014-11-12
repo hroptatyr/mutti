@@ -154,7 +154,7 @@ dt_strp(const char *str, char **on)
 
 	/* and now parse the time, allow military midnight */
 	if ((tmp = strtoi_lim(sp, &sp, 0, 24)) < 0 || *sp++ != ':') {
-		goto nul;
+		goto out;
 	}
 	res.H = tmp;
 
