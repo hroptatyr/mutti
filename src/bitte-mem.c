@@ -240,18 +240,52 @@ ftmap_rsz(struct ftmap_s *m)
 /* extend by doubling the hash array, no rehashing will take place */
 	if (UNLIKELY(!m->zfacts)) {
 		return init_ftmap(m);
-	}
-	const size_t ol = 1ULL << m->zfacts;
-	const size_t nu = 1ULL << ++m->zfacts;
-	void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
-	void *ps = xzfalloc(m->span, ol, nu, sizeof(*m->span));
+	} else if ((m->zfacts + 1U) / FTMAP_LEAST != m->zfacts / FTMAP_LEAST) {
+		/* rehash */
+		const size_t nu = 1ULL << (m->zfacts + 1U);
+		mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
+		struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
 
-	if (UNLIKELY(pf == NULL || ps == NULL)) {
-		/* brill */
-		return -1;
+		if (UNLIKELY(pf == NULL || ps == NULL)) {
+			/* brill */
+			return -1;
+		}
+
+		/* rehash */
+		FTMAP_FOREACH(i, m) {
+			size_t o;
+
+			/* loop */
+			for (o = m->facts[i] & (nu - 1ULL); o < nu; o++) {
+				if (!pf[o]) {
+					pf[o] = m->facts[i];
+					ps[o] = m->span[i];
+					break;
+				}
+			}
+			if (UNLIKELY(o == nu)) {
+				/* grml */
+				abort();
+			}
+		}
+
+		m->zfacts++;
+		m->facts = pf;
+		m->span = ps;
+	} else {
+		/* no rehashing */
+		const size_t ol = 1ULL << m->zfacts;
+		const size_t nu = 1ULL << ++m->zfacts;
+		void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
+		void *ps = xzfalloc(m->span, ol, nu, sizeof(*m->span));
+
+		if (UNLIKELY(pf == NULL || ps == NULL)) {
+			/* brill */
+			return -1;
+		}
+		m->facts = pf;
+		m->span = ps;
 	}
-	m->facts = pf;
-	m->span = ps;
 	return 0;
 }
 
