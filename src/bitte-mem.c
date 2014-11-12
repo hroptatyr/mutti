@@ -261,11 +261,17 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 /* this is the offset getting routine
  * we'll check fact mod every 2-power up until m->zfacts
  * and slots right thereof */
-	for (size_t i = FTMAP_LEAST; i <= m->zfacts; i++) {
+	size_t i = (m->zfacts / FTMAP_LEAST) * FTMAP_LEAST;
+
+	if (UNLIKELY(!i)) {
+		goto out;
+	}
+	for (; i <= m->zfacts; i++) {
 		const size_t z = (1ULL << i);
 
 		/* just loop through him */
-		for (size_t o = fact & (z - 1ULL); o < z; o++) {
+		for (size_t o = fact & (z - 1ULL),
+			     eo = o + (1ULL << FTMAP_LEAST); o < eo; o++) {
 			if (!m->facts[o] || m->facts[o] == fact) {
 				return o;
 			}
@@ -276,6 +282,7 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 			abort();
 		}
 	}
+out:
 	return (size_t)-1;
 }
 
