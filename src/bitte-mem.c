@@ -410,6 +410,16 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 	return 0;
 }
 
+static inline __attribute__((nonnull(1))) int
+tmln_chkz(struct tmln_s *restrict s, size_t nadd)
+{
+/* check if there's enough space to add NADD more items */
+	if (UNLIKELY(!(s->ntrans % NTPB))) {
+		return tmln_resize(s, NTPB);
+	}
+	return 0;
+}
+
 
 /* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
@@ -645,10 +655,8 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s = &stor;
 	}
 	/* check for resize */
-	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 1U) < 0)) {
+		return -1;
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
@@ -684,10 +692,8 @@ _rem(mut_stor_t s, mut_oid_t fact)
 	}
 	/* otherwise kill him */
 	/* check for resize */
-	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 1U) < 0)) {
+		return -1;
 	}
 	/* stamp him off */
 	with (echs_instant_t now = echs_now()) {
@@ -743,14 +749,8 @@ _supersede(
 	}
 
 	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(new && !((_s->tmln.ntrans + 1U) % NTPB) ||
-		     !(_s->tmln.ntrans % NTPB))) {
-		const size_t n = NTPB +
-			(new && !((_s->tmln.ntrans + 1U) % NTPB));
-
-		if (UNLIKELY(tmln_resize(&_s->tmln, n) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 2U) < 0)) {
+		return -1;
 	}
 	/* atomically handle the supersedure */
 	with (echs_instant_t t = echs_now()) {
