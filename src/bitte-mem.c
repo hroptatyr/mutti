@@ -66,6 +66,7 @@ typedef uintptr_t mut_tid_t;
 /* simple timeline index */
 struct tmln_s {
 	size_t ntrans;
+	size_t ztrans;
 	echs_instant_t *trans;
 	mut_oid_t *facts;
 	echs_range_t *valids;
@@ -205,7 +206,8 @@ _stor_get_valid(const struct _stor_s *s, mut_tid_t t)
 static int
 init_ftmap(ftmap_t m)
 {
-#define FTMAP_LEAST	(6U)
+#define FTMAP_LEAST	(9U)
+#define FTMAP_RSTEP	(3U)
 	assert(m->nfacts == 0U);
 	assert(m->zfacts == 0U);
 	assert(m->facts == NULL);
@@ -234,59 +236,45 @@ fini_ftmap(ftmap_t m)
 	return;
 }
 
-static int
+static __attribute__((noinline)) int
 ftmap_rsz(struct ftmap_s *m)
 {
 /* extend by doubling the hash array, no rehashing will take place */
 	if (UNLIKELY(!m->zfacts)) {
 		return init_ftmap(m);
-	} else if ((m->zfacts + 1U) / FTMAP_LEAST != m->zfacts / FTMAP_LEAST) {
-		/* rehash */
-		const size_t nu = 1ULL << (m->zfacts + 1U);
-		mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
-		struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
-
-		if (UNLIKELY(pf == NULL || ps == NULL)) {
-			/* brill */
-			return -1;
-		}
-
-		/* rehash */
-		FTMAP_FOREACH(i, m) {
-			size_t o = m->facts[i] & (nu - 1ULL);
-			const size_t eo = o + (1ULL << FTMAP_LEAST);
-
-			/* loop */
-			for (; o < eo; o++) {
-				if (!pf[o]) {
-					pf[o] = m->facts[i];
-					ps[o] = m->span[i];
-					break;
-				}
-			}
-			if (UNLIKELY(o == eo)) {
-				/* grml */
-				abort();
-			}
-		}
-
-		m->zfacts++;
-		m->facts = pf;
-		m->span = ps;
-	} else {
-		/* no rehashing */
-		const size_t ol = 1ULL << m->zfacts;
-		const size_t nu = 1ULL << ++m->zfacts;
-		void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
-		void *ps = xzfalloc(m->span, ol, nu, sizeof(*m->span));
-
-		if (UNLIKELY(pf == NULL || ps == NULL)) {
-			/* brill */
-			return -1;
-		}
-		m->facts = pf;
-		m->span = ps;
 	}
+	/* rehash */
+	const size_t nu = 1ULL << (m->zfacts + 1U);
+	mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
+	struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
+
+	if (UNLIKELY(pf == NULL || ps == NULL)) {
+		/* brill */
+		return -1;
+	}
+
+	/* rehash */
+	FTMAP_FOREACH(i, m) {
+		size_t o = m->facts[i] & (nu - 1ULL) & ~0x7ULL;
+		const size_t eo = o + 8U;
+
+		/* loop */
+		for (; o < eo; o++) {
+			if (!pf[o]) {
+				pf[o] = m->facts[i];
+				ps[o] = m->span[i];
+				break;
+			}
+		}
+		if (UNLIKELY(o == eo)) {
+			/* grml */
+			abort();
+		}
+	}
+
+	m->zfacts++;
+	m->facts = pf;
+	m->span = ps;
 	return 0;
 }
 
@@ -294,19 +282,13 @@ static inline __attribute__((pure)) size_t
 ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 {
 /* this is the offset getting routine
- * we'll check fact mod every 2-power up until m->zfacts
- * and slots right thereof */
-	size_t i = (m->zfacts / FTMAP_LEAST) * FTMAP_LEAST;
-
-	if (UNLIKELY(!i)) {
-		goto out;
-	}
-	for (; i <= m->zfacts; i++) {
-		const size_t z = (1ULL << i);
+ * we'll check fact mod 2^m->zfacts and all slots in the 64B cache-line */
+	if (LIKELY(m->zfacts)) {
+		const size_t z = (1ULL << m->zfacts);
 
 		/* just loop through him */
-		for (size_t o = fact & (z - 1ULL),
-			     eo = o + (1ULL << FTMAP_LEAST); o < eo; o++) {
+		for (size_t o = fact & (z - 1ULL) & ~0x7ULL,
+			     eo = o + 8U; o < eo; o++) {
 			if (!m->facts[o] || m->facts[o] == fact) {
 				return o;
 			}
@@ -317,7 +299,6 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 			abort();
 		}
 	}
-out:
 	return (size_t)-1;
 }
 
@@ -411,8 +392,8 @@ static __attribute__((nonnull(1))) int
 tmln_resize(struct tmln_s *restrict s, size_t nadd)
 {
 /* resize to NADD additional slots */
-	const size_t zol = s->ntrans;
-	const size_t znu = zol + nadd;
+	const size_t zol = s->ztrans;
+	const size_t znu = zol * 2U ?: zol + nadd;
 	void *nu_t, *nu_i, *nu_v;
 
 	nu_t = xzfalloc(s->trans, zol, znu, sizeof(*s->trans));
@@ -427,6 +408,17 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 	s->trans = nu_t;
 	s->facts = nu_i;
 	s->valids = nu_v;
+	s->ztrans = znu;
+	return 0;
+}
+
+static inline __attribute__((nonnull(1))) int
+tmln_chkz(struct tmln_s *restrict s, size_t nadd)
+{
+/* check if there's enough space to add NADD more items */
+	if (UNLIKELY(s->ntrans + nadd > s->ztrans)) {
+		return tmln_resize(s, NTPB);
+	}
 	return 0;
 }
 
@@ -665,10 +657,8 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s = &stor;
 	}
 	/* check for resize */
-	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 1U) < 0)) {
+		return -1;
 	}
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
@@ -704,10 +694,8 @@ _rem(mut_stor_t s, mut_oid_t fact)
 	}
 	/* otherwise kill him */
 	/* check for resize */
-	if (UNLIKELY(!(_s->tmln.ntrans % NTPB))) {
-		if (UNLIKELY(tmln_resize(&_s->tmln, NTPB) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 1U) < 0)) {
+		return -1;
 	}
 	/* stamp him off */
 	with (echs_instant_t now = echs_now()) {
@@ -763,14 +751,8 @@ _supersede(
 	}
 
 	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(new && !((_s->tmln.ntrans + 1U) % NTPB) ||
-		     !(_s->tmln.ntrans % NTPB))) {
-		const size_t n = NTPB +
-			(new && !((_s->tmln.ntrans + 1U) % NTPB));
-
-		if (UNLIKELY(tmln_resize(&_s->tmln, n) < 0)) {
-			return -1;
-		}
+	if (UNLIKELY(tmln_chkz(&_s->tmln, 2U) < 0)) {
+		return -1;
 	}
 	/* atomically handle the supersedure */
 	with (echs_instant_t t = echs_now()) {
