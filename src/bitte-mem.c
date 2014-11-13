@@ -235,59 +235,45 @@ fini_ftmap(ftmap_t m)
 	return;
 }
 
-static int
+static __attribute__((noinline)) int
 ftmap_rsz(struct ftmap_s *m)
 {
 /* extend by doubling the hash array, no rehashing will take place */
 	if (UNLIKELY(!m->zfacts)) {
 		return init_ftmap(m);
-	} else if ((m->zfacts + 1U) / FTMAP_RSTEP != m->zfacts / FTMAP_RSTEP) {
-		/* rehash */
-		const size_t nu = 1ULL << (m->zfacts + 1U);
-		mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
-		struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
-
-		if (UNLIKELY(pf == NULL || ps == NULL)) {
-			/* brill */
-			return -1;
-		}
-
-		/* rehash */
-		FTMAP_FOREACH(i, m) {
-			size_t o = m->facts[i] & (nu - 1ULL) & ~0x7ULL;
-			const size_t eo = o + 8U;
-
-			/* loop */
-			for (; o < eo; o++) {
-				if (!pf[o]) {
-					pf[o] = m->facts[i];
-					ps[o] = m->span[i];
-					break;
-				}
-			}
-			if (UNLIKELY(o == eo)) {
-				/* grml */
-				abort();
-			}
-		}
-
-		m->zfacts++;
-		m->facts = pf;
-		m->span = ps;
-	} else {
-		/* no rehashing */
-		const size_t ol = 1ULL << m->zfacts;
-		const size_t nu = 1ULL << ++m->zfacts;
-		void *pf = xzfalloc(m->facts, ol, nu, sizeof(*m->facts));
-		void *ps = xzfalloc(m->span, ol, nu, sizeof(*m->span));
-
-		if (UNLIKELY(pf == NULL || ps == NULL)) {
-			/* brill */
-			return -1;
-		}
-		m->facts = pf;
-		m->span = ps;
 	}
+	/* rehash */
+	const size_t nu = 1ULL << (m->zfacts + 1U);
+	mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
+	struct ftnd_s *ps = xzfalloc(NULL, 0UL, nu, sizeof(*m->span));
+
+	if (UNLIKELY(pf == NULL || ps == NULL)) {
+		/* brill */
+		return -1;
+	}
+
+	/* rehash */
+	FTMAP_FOREACH(i, m) {
+		size_t o = m->facts[i] & (nu - 1ULL) & ~0x7ULL;
+		const size_t eo = o + 8U;
+
+		/* loop */
+		for (; o < eo; o++) {
+			if (!pf[o]) {
+				pf[o] = m->facts[i];
+				ps[o] = m->span[i];
+				break;
+			}
+		}
+		if (UNLIKELY(o == eo)) {
+			/* grml */
+			abort();
+		}
+	}
+
+	m->zfacts++;
+	m->facts = pf;
+	m->span = ps;
 	return 0;
 }
 
@@ -295,15 +281,9 @@ static inline __attribute__((pure)) size_t
 ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 {
 /* this is the offset getting routine
- * we'll check fact mod every 2-power up until m->zfacts
- * and slots right thereof */
-	size_t i = (m->zfacts / FTMAP_RSTEP) * FTMAP_RSTEP;
-
-	if (UNLIKELY(!i)) {
-		goto out;
-	}
-	for (; i <= m->zfacts; i++) {
-		const size_t z = (1ULL << i);
+ * we'll check fact mod 2^m->zfacts and all slots in the 64B cache-line */
+	if (LIKELY(m->zfacts)) {
+		const size_t z = (1ULL << m->zfacts);
 
 		/* just loop through him */
 		for (size_t o = fact & (z - 1ULL) & ~0x7ULL,
@@ -318,7 +298,6 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 			abort();
 		}
 	}
-out:
 	return (size_t)-1;
 }
 
