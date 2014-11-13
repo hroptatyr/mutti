@@ -66,6 +66,7 @@ typedef uintptr_t mut_tid_t;
 /* simple timeline index */
 struct tmln_s {
 	size_t ntrans;
+	size_t ztrans;
 	echs_instant_t *trans;
 	mut_oid_t *facts;
 	echs_range_t *valids;
@@ -391,8 +392,8 @@ static __attribute__((nonnull(1))) int
 tmln_resize(struct tmln_s *restrict s, size_t nadd)
 {
 /* resize to NADD additional slots */
-	const size_t zol = s->ntrans;
-	const size_t znu = zol + nadd;
+	const size_t zol = s->ztrans;
+	const size_t znu = zol * 2U ?: zol + nadd;
 	void *nu_t, *nu_i, *nu_v;
 
 	nu_t = xzfalloc(s->trans, zol, znu, sizeof(*s->trans));
@@ -407,6 +408,7 @@ tmln_resize(struct tmln_s *restrict s, size_t nadd)
 	s->trans = nu_t;
 	s->facts = nu_i;
 	s->valids = nu_v;
+	s->ztrans = znu;
 	return 0;
 }
 
@@ -414,7 +416,7 @@ static inline __attribute__((nonnull(1))) int
 tmln_chkz(struct tmln_s *restrict s, size_t nadd)
 {
 /* check if there's enough space to add NADD more items */
-	if (UNLIKELY(!(s->ntrans % NTPB))) {
+	if (UNLIKELY(s->ntrans + nadd > s->ztrans)) {
 		return tmln_resize(s, NTPB);
 	}
 	return 0;
