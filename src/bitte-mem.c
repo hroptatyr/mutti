@@ -205,7 +205,8 @@ _stor_get_valid(const struct _stor_s *s, mut_tid_t t)
 static int
 init_ftmap(ftmap_t m)
 {
-#define FTMAP_LEAST	(6U)
+#define FTMAP_LEAST	(9U)
+#define FTMAP_RSTEP	(3U)
 	assert(m->nfacts == 0U);
 	assert(m->zfacts == 0U);
 	assert(m->facts == NULL);
@@ -240,7 +241,7 @@ ftmap_rsz(struct ftmap_s *m)
 /* extend by doubling the hash array, no rehashing will take place */
 	if (UNLIKELY(!m->zfacts)) {
 		return init_ftmap(m);
-	} else if ((m->zfacts + 1U) / FTMAP_LEAST != m->zfacts / FTMAP_LEAST) {
+	} else if ((m->zfacts + 1U) / FTMAP_RSTEP != m->zfacts / FTMAP_RSTEP) {
 		/* rehash */
 		const size_t nu = 1ULL << (m->zfacts + 1U);
 		mut_oid_t *pf = xzfalloc(NULL, 0UL, nu, sizeof(*m->facts));
@@ -253,8 +254,8 @@ ftmap_rsz(struct ftmap_s *m)
 
 		/* rehash */
 		FTMAP_FOREACH(i, m) {
-			size_t o = m->facts[i] & (nu - 1ULL);
-			const size_t eo = o + (1ULL << FTMAP_LEAST);
+			size_t o = m->facts[i] & (nu - 1ULL) & ~0x7ULL;
+			const size_t eo = o + 8U;
 
 			/* loop */
 			for (; o < eo; o++) {
@@ -296,7 +297,7 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 /* this is the offset getting routine
  * we'll check fact mod every 2-power up until m->zfacts
  * and slots right thereof */
-	size_t i = (m->zfacts / FTMAP_LEAST) * FTMAP_LEAST;
+	size_t i = (m->zfacts / FTMAP_RSTEP) * FTMAP_RSTEP;
 
 	if (UNLIKELY(!i)) {
 		goto out;
@@ -305,8 +306,8 @@ ftmap_off(const struct ftmap_s *m, mut_oid_t fact)
 		const size_t z = (1ULL << i);
 
 		/* just loop through him */
-		for (size_t o = fact & (z - 1ULL),
-			     eo = o + (1ULL << FTMAP_LEAST); o < eo; o++) {
+		for (size_t o = fact & (z - 1ULL) & ~0x7ULL,
+			     eo = o + 8U; o < eo; o++) {
 			if (!m->facts[o] || m->facts[o] == fact) {
 				return o;
 			}
