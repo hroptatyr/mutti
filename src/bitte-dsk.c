@@ -258,89 +258,257 @@ _stor_get_valid(struct _stor_s *restrict s, mut_tid_t t)
 }
 
 
-/* ftmap fiddling */
-#define RB_COMPACT	1
-#include "rb.h"
-
-typedef struct ftnd_s ftnd_t;
+/* ftmap fiddling, materialised rb.h */
 struct ftnd_s {
 	mut_oid_t fact;
-	rb_node(ftnd_t) rb_link;
+	uint32_t left;
+	uint32_t rght:31;
+	uint32_t redp:1;
 };
-typedef rbt(ftnd_t) _ftmap_t;
-typedef struct ftmap_s {
-	_ftmap_t tree;
-	size_t nfacts;
-	ftnd_t facts[NXPP];
-	mut_fof_t fof[NXPP];
-} *ftmap_t;
 
-static inline __attribute__((pure)) int
-rb_cmp(const ftnd_t *a, const ftnd_t *b)
+struct fttr_s {
+	mut_oid_t nfacts;
+	uint32_t root;
+	uint32_t unused;
+};
+
+/* left accessors */
+static inline struct ftnd_s*
+rbt_node_new(struct ftnd_s *restrict base, uint32_t of)
 {
-	return a->fact - b->fact;
+	base[of].left = 0U;
+	base[of].rght = 0U;
+	base[of].redp = 1U;
+	return base + of;
 }
 
-rb_gen(static __attribute__((unused)), ftmap_, _ftmap_t, ftnd_t, rb_link, rb_cmp);
+static inline void
+rb_new(struct fttr_s *restrict x)
+{
+	memset(x, 0, sizeof(*x));
+	return;
+}
 
-#define FTMAP_FOREACH(var, map)			\
-	for (size_t var = 0U; var < (1ULL << (map)->zfacts); var++)	\
-		if ((map)->facts[var])
+/* internal util macros */
+static inline struct ftnd_s*
+rbtn_first(struct fttr_s *x)
+{
+	struct ftnd_s *const base = (void*)x;
+	struct ftnd_s *r;
+
+	if (UNLIKELY(!x->root)) {
+		return NULL;
+	}
+	r = (void*)x;
+	for (struct ftnd_s *y; (y = rbtn_left_get(base, r)) != NULL; r = y);
+	return r;
+}
+
+static inline struct ftnd_s*
+rbtn_last(struct fttr_s *x)
+{
+	struct ftnd_s *const base = (void*)x;
+	struct ftnd_s *r;
+
+	if (UNLIKELY(!x->root)) {
+		return NULL;
+	}
+	/* descend from root */
+	r = rbtn_left_get(base, (void*)x);
+	for (struct ftnd_s *y; (y = rbtn_right_get(base, r)) != NULL; r = y);
+	return r;
+}
+
+static uint32_t
+rbtn_rot_left(struct ftnd_s *base, uint32_t x)
+{
+	uint32_t res = base[x].rght;
+
+	base[x].rght = base[res].left;
+	base[res].left = x;
+	return res;
+}
+
+static uint32_t
+rbtn_rot_rght(struct ftnd_s *base, uint32_t x)
+{
+	uint32_t res = base[x].left;
+
+	base[x].left = base[res].rght;
+	base[res].rght = x;
+	return res;
+}
+
+static inline __attribute__((pure)) int
+rb_cmp(mut_oid_t fact, const struct ftnd_s *b)
+{
+	return fact - b->fact;
+}
+
+static uint32_t
+rb_search(struct fttr_s *t, mut_oid_t fact)
+{
+	struct ftnd_s *const base = (void*)t;
+	uint32_t ro = t->root;
+	int cmp;
+
+	while (ro && (cmp = rb_cmp(fact, base + ro))) {
+		if (cmp < 0) {
+			ro = base[ro].left;
+		} else /*if (cmp > 0)*/ {
+			ro = base[ro].rght;
+		}
+	}
+	return ro;
+}
+
+static void
+rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
+{
+	struct ftnd_s *const base = (struct ftnd_s*)t;
+	struct {
+		uint32_t no;
+		int cmp;
+	} path[sizeof(void*) << 4U], *pp = path;
+
+	/* wind */
+	path->no = t->root;
+	for (pp->no = t->root; pp->no; pp++) {
+		int cmp = pp->cmp = rb_cmp(fn->fact, base + pp->no);
+
+		assert(cmp != 0);
+		if (cmp < 0) {
+			pp[1U].no = base[pp->no].left;
+		} else /*if (cmp > 0)*/ {
+			pp[1U].no = base[pp->no].rght;
+		}
+	}
+	/* invariant: pp->no == 0U */
+	pp->no = fn - base;
+
+	/* unwind */
+	for (pp--; pp >= path; pp--) {
+		uint32_t cur = pp->no;
+
+		if (pp->cmp < 0) {
+			uint32_t left = pp[1].no;
+			base[cur].left = left;
+			if (base[left].redp) {
+				uint32_t leftleft = base[left].left;
+				if (base[leftleft].redp) {
+					/* blacken leftleft */
+					base[leftleft].redp = 0U;
+					cur = rbtn_rot_rght(base, cur);
+				}
+			} else {
+				return;
+			}
+		} else /*if (cmp > 0)*/ {
+			uint32_t rght = pp[1].no;
+			base[cur].rght = rght;
+			if (base[rght].redp) {
+				uint32_t left = base[cur].left;
+				if (base[left].redp) {
+					/* split 4-node */
+					base[left].redp = 0U;
+					base[rght].redp = 0U;
+					base[cur].redp = 1U;
+				} else {
+					/* lean left */
+					uint32_t tmp;
+
+					tmp = rbtn_rot_left(base, cur);
+					base[tmp].redp = base[cur].redp;
+					base[cur].redp = 1U;
+					cur = tmp;
+				}
+			} else {
+				return;
+			}
+		}
+		pp->no = cur;
+	}
+	/* set root and paint it black */
+	t->root = path->no;
+	base[t->root].redp = 0U;
+	return;
+}
+
+
+/* ftmaps on top of red-black trees */
+typedef struct {
+	struct fttr_s tree[NXPP];
+	mut_fof_t fof[NXPP];
+} *ftmap_t;
 
 static int
 init_ftmap(ftmap_t m)
 {
-	ftmap_new(&m->tree);
+	rb_new(m->tree);
 	return 0;
 }
 
 static void
-fini_ftmap(ftmap_t m)
+fini_ftmap(ftmap_t UNUSED(m))
 {
 	return;
 }
 
-static __attribute__((nonnull(1))) struct ftnd_s*
-ftmap_get(_ftmap_t *t, mut_oid_t fact)
+static inline mut_fof_t*
+ftmap_get(ftmap_t m, mut_oid_t fact)
 {
-	return ftmap_search(t, &(ftnd_t){fact});
+	uint32_t ro = rb_search(m->tree, fact);
+
+	if (UNLIKELY(!ro)) {
+		return NULL;
+	}
+	return m->fof + ro;
+}
+
+static inline mut_fof_t*
+ftmap_put(ftmap_t m, mut_oid_t fact)
+{
+	struct ftnd_s *f =
+		rbt_node_new((struct ftnd_s*)m->tree, ++m->tree->nfacts);
+
+	f->fact = fact;
+	rb_insert(m->tree, f);
+	return m->fof + m->tree->nfacts;
 }
 
 static __attribute__((nonnull(1), flatten)) mut_tid_t
 ftmap_get_last(ftmap_t m, mut_oid_t fact)
 {
-	const struct ftnd_s *f = ftmap_get(&m->tree, fact);
+	const mut_fof_t *f = ftmap_get(m, fact);
 
 	if (UNLIKELY(f == NULL)) {
 		return TID_NOT_FOUND;
 	}
-	return m->fof[f - m->facts].last;
+	return f->last;
 }
 
 static __attribute__((nonnull(1), flatten)) mut_tid_t
 ftmap_get_first(ftmap_t m, mut_oid_t fact)
 {
-	const struct ftnd_s *f = ftmap_get(&m->tree, fact);
+	const mut_fof_t *f = ftmap_get(m, fact);
 
 	if (UNLIKELY(f == NULL)) {
 		return TID_NOT_FOUND;
 	}
-	return m->fof[f - m->facts]._1st;
+	return f->_1st;
 }
 
 static int
 ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 {
-	struct ftnd_s *f = ftmap_get(&m->tree, fact);
+	mut_fof_t *f = ftmap_get(m, fact);
 
 	if (UNLIKELY(f == NULL)) {
 		/* prep the key */
-		f = m->facts + m->nfacts;
-		f->fact = fact;
-		ftmap_insert(&m->tree, f);
-		m->fof[m->nfacts++]._1st = last;
+		f = ftmap_put(m, fact);
+		f->_1st = last;
 	}
-	m->fof[f - m->facts].last = last;
+	f->last = last;
 	return 0;
 }
 
@@ -562,6 +730,8 @@ _open(const char *fn, int fl)
 	res->curp = curp;
 	/* quickly guess the number of transactions */
 	res->ntrans = st.st_size / PGSZ * NXPP;
+	/* get some more initialisation work done */
+	init_ftmap(&res->curp->fht);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
