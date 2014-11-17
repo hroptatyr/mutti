@@ -59,9 +59,11 @@ init_impls(void)
 {
 	extern struct bitte_backend_s bitte_mem_LTX_backend;
 	extern struct bitte_backend_s bitte_bdb_LTX_backend;
+	extern struct bitte_backend_s bitte_dsk_LTX_backend;
 
 	impls[MUT_STOR_TYPE_MEM] = bitte_mem_LTX_backend;
 	impls[MUT_STOR_TYPE_BDB] = bitte_bdb_LTX_backend;
+	impls[MUT_STOR_TYPE_DSK] = bitte_dsk_LTX_backend;
 	return;
 }
 #endif	/* !BUILD_DSO */
