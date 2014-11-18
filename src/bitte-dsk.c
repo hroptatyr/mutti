@@ -752,6 +752,8 @@ _close(mut_stor_t s)
 {
 	_stor_t _s = (_stor_t)s;
 
+	/* finalise the ftmap */
+	fini_ftmap(&_s->ftm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
 	/* munmap any cached pages */
