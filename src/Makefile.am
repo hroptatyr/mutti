@@ -30,6 +30,7 @@ libmutti_la_SOURCES += dt-strpf.c dt-strpf.h
 libmutti_la_SOURCES += bitte.c bitte.h bitte-private.h
 libmutti_la_SOURCES += bitte-mem.c
 libmutti_la_SOURCES += bitte-bdb.c
+libmutti_la_SOURCES += bitte-dsk.c
 libmutti_la_SOURCES += nifty.h
 libmutti_la_LDFLAGS = $(AM_LDFLAGS)
 libmutti_la_LDFLAGS += -ldb

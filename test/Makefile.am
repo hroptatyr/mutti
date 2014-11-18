@@ -54,6 +54,10 @@ check_PROGRAMS += addgetrem_bdb_03
 addgetrem_bdb_03_LDADD = $(mutti_LIBS)
 cli_tests += addgetrem_bdb_03.clit
 
+check_PROGRAMS += addgetrem_dsk_01
+addgetrem_dsk_01_LDADD = $(mutti_LIBS)
+cli_tests += addgetrem_dsk_01.clit
+
 check_PROGRAMS += rtr_01
 rtr_01_LDADD = $(mutti_LIBS)
 cli_tests += rtr_01.clit

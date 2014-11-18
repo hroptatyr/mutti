@@ -58,6 +58,7 @@ typedef enum {
 	MUT_STOR_TYPE_UNK,
 	MUT_STOR_TYPE_MEM,
 	MUT_STOR_TYPE_BDB,
+	MUT_STOR_TYPE_DSK,
 	NMUT_STOR_TYPES,
 } mut_stor_type_t;
 
