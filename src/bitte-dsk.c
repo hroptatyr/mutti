@@ -738,7 +738,7 @@ _open(const char *fn, int fl)
 	res->fd = fd;
 	res->curp = curp;
 	/* quickly guess the number of transactions */
-	res->ntrans = st.st_size / PGSZ * NXPP;
+	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
 	/* get some more initialisation work done */
 	init_ftmap(&res->ftm, res->curp->fht, res->curp->fof);
 	return (mut_stor_t)res;
