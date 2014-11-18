@@ -714,7 +714,7 @@ _open(const char *fn, int fl)
 
 	if (UNLIKELY(fn == NULL)) {
 		return NULL;
-	} else if (UNLIKELY((fd = open(fn, fl & ~O_TRUNC, 0666)) < 0)) {
+	} else if (UNLIKELY((fd = open(fn, fl, 0666)) < 0)) {
 		return NULL;
 	} else if (!(fl & O_RDWR)) {
 		/* aaah, read-only, aye aye */
