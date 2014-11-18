@@ -290,69 +290,68 @@ rb_new(struct fttr_s *restrict x)
 }
 
 /* internal util macros */
-static inline struct ftnd_s*
-rbtn_first(struct fttr_s *x)
+static uint32_t
+rbtn_first(const struct fttr_s *t)
 {
-	struct ftnd_s *const base = (void*)x;
-	struct ftnd_s *r;
+	const struct ftnd_s *const base = (const struct ftnd_s*)t;
+	uint32_t r;
 
-	if (UNLIKELY(!x->root)) {
-		return NULL;
+	if (UNLIKELY(!(r = t->root))) {
+		return 0U;
 	}
-	r = (void*)x;
-	for (struct ftnd_s *y; (y = rbtn_left_get(base, r)) != NULL; r = y);
-	return r;
-}
-
-static inline struct ftnd_s*
-rbtn_last(struct fttr_s *x)
-{
-	struct ftnd_s *const base = (void*)x;
-	struct ftnd_s *r;
-
-	if (UNLIKELY(!x->root)) {
-		return NULL;
-	}
-	/* descend from root */
-	r = rbtn_left_get(base, (void*)x);
-	for (struct ftnd_s *y; (y = rbtn_right_get(base, r)) != NULL; r = y);
+	for (uint32_t tmp; (tmp = base[r].left); r = tmp);
 	return r;
 }
 
 static uint32_t
-rbtn_rot_left(struct ftnd_s *base, uint32_t x)
+rbtn_last(const struct fttr_s *t)
 {
-	uint32_t res = base[x].rght;
+	const struct ftnd_s *const base = (const struct ftnd_s*)t;
+	uint32_t r;
 
-	base[x].rght = base[res].left;
-	base[res].left = x;
+	if (UNLIKELY(!(r = t->root))) {
+		return 0U;
+	}
+	for (uint32_t tmp; (tmp = base[r].rght); r = tmp);
+	return r;
+}
+
+static uint32_t
+rbtn_rot_left(struct fttr_s *restrict t, uint32_t node)
+{
+	struct ftnd_s *const base = (struct ftnd_s*)t;
+	uint32_t res = base[node].rght;
+
+	base[node].rght = base[res].left;
+	base[res].left = node;
 	return res;
 }
 
 static uint32_t
-rbtn_rot_rght(struct ftnd_s *base, uint32_t x)
+rbtn_rot_rght(struct fttr_s *restrict t, uint32_t node)
 {
-	uint32_t res = base[x].left;
+	struct ftnd_s *const base = (struct ftnd_s*)t;
+	uint32_t res = base[node].left;
 
-	base[x].left = base[res].rght;
-	base[res].rght = x;
+	base[node].left = base[res].rght;
+	base[res].rght = node;
 	return res;
 }
 
-static inline __attribute__((pure)) int
-rb_cmp(mut_oid_t fact, const struct ftnd_s *b)
+static inline __attribute__((const, pure)) int
+rb_cmp(mut_oid_t a, mut_oid_t b)
 {
-	return fact - b->fact;
+	return a - b;
 }
 
 static uint32_t
-rb_search(struct fttr_s *t, mut_oid_t fact)
+rb_search(const struct fttr_s *t, mut_oid_t fact)
 {
-	struct ftnd_s *const base = (void*)t;
+	const struct ftnd_s *const base = (const struct ftnd_s*)t;
 	uint32_t ro = t->root;
 	int cmp;
 
-	while (ro && (cmp = rb_cmp(fact, base + ro))) {
+	while (ro && (cmp = rb_cmp(fact, base[ro].fact))) {
 		if (cmp < 0) {
 			ro = base[ro].left;
 		} else /*if (cmp > 0)*/ {
@@ -365,7 +364,7 @@ rb_search(struct fttr_s *t, mut_oid_t fact)
 static void
 rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 {
-	struct ftnd_s *const base = (struct ftnd_s*)t;
+	struct ftnd_s *const restrict base = (struct ftnd_s*)t;
 	struct {
 		uint32_t no;
 		int cmp;
@@ -374,7 +373,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 	/* wind */
 	path->no = t->root;
 	for (pp->no = t->root; pp->no; pp++) {
-		int cmp = pp->cmp = rb_cmp(fn->fact, base + pp->no);
+		int cmp = pp->cmp = rb_cmp(fn->fact, base[pp->no].fact);
 
 		assert(cmp != 0);
 		if (cmp < 0) {
@@ -398,7 +397,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 				if (base[leftleft].redp) {
 					/* blacken leftleft */
 					base[leftleft].redp = 0U;
-					cur = rbtn_rot_rght(base, cur);
+					cur = rbtn_rot_rght(t, cur);
 				}
 			} else {
 				return;
@@ -417,7 +416,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 					/* lean left */
 					uint32_t tmp;
 
-					tmp = rbtn_rot_left(base, cur);
+					tmp = rbtn_rot_left(t, cur);
 					base[tmp].redp = base[cur].redp;
 					base[cur].redp = 1U;
 					cur = tmp;
