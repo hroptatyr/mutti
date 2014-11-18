@@ -259,22 +259,24 @@ _stor_get_valid(struct _stor_s *restrict s, mut_tid_t t)
 
 
 /* ftmap fiddling, materialised rb.h */
+typedef uint32_t ftnd_t;
+
 struct ftnd_s {
 	mut_oid_t fact;
-	uint32_t left;
-	uint32_t rght:31;
-	uint32_t redp:1;
+	ftnd_t left;
+	ftnd_t rght:31;
+	ftnd_t redp:1;
 };
 
 struct fttr_s {
 	mut_oid_t nfacts;
-	uint32_t root;
-	uint32_t unused;
+	ftnd_t root;
+	ftnd_t:32;
 };
 
 /* left accessors */
 static inline struct ftnd_s*
-rbt_node_new(struct ftnd_s *restrict base, uint32_t of)
+rbt_node_new(struct ftnd_s *restrict base, ftnd_t of)
 {
 	base[of].left = 0U;
 	base[of].rght = 0U;
@@ -290,48 +292,48 @@ rb_new(struct fttr_s *restrict x)
 }
 
 /* internal util macros */
-static uint32_t
+static ftnd_t
 rbtn_first(const struct fttr_s *t)
 {
 	const struct ftnd_s *const base = (const struct ftnd_s*)t;
-	uint32_t r;
+	ftnd_t r;
 
 	if (UNLIKELY(!(r = t->root))) {
 		return 0U;
 	}
-	for (uint32_t tmp; (tmp = base[r].left); r = tmp);
+	for (ftnd_t tmp; (tmp = base[r].left); r = tmp);
 	return r;
 }
 
-static uint32_t
+static ftnd_t
 rbtn_last(const struct fttr_s *t)
 {
 	const struct ftnd_s *const base = (const struct ftnd_s*)t;
-	uint32_t r;
+	ftnd_t r;
 
 	if (UNLIKELY(!(r = t->root))) {
 		return 0U;
 	}
-	for (uint32_t tmp; (tmp = base[r].rght); r = tmp);
+	for (ftnd_t tmp; (tmp = base[r].rght); r = tmp);
 	return r;
 }
 
-static uint32_t
-rbtn_rot_left(struct fttr_s *restrict t, uint32_t node)
+static ftnd_t
+rbtn_rot_left(struct fttr_s *restrict t, ftnd_t node)
 {
 	struct ftnd_s *const base = (struct ftnd_s*)t;
-	uint32_t res = base[node].rght;
+	ftnd_t res = base[node].rght;
 
 	base[node].rght = base[res].left;
 	base[res].left = node;
 	return res;
 }
 
-static uint32_t
-rbtn_rot_rght(struct fttr_s *restrict t, uint32_t node)
+static ftnd_t
+rbtn_rot_rght(struct fttr_s *restrict t, ftnd_t node)
 {
 	struct ftnd_s *const base = (struct ftnd_s*)t;
-	uint32_t res = base[node].left;
+	ftnd_t res = base[node].left;
 
 	base[node].left = base[res].rght;
 	base[res].rght = node;
@@ -344,11 +346,11 @@ rb_cmp(mut_oid_t a, mut_oid_t b)
 	return a - b;
 }
 
-static uint32_t
+static ftnd_t
 rb_search(const struct fttr_s *t, mut_oid_t fact)
 {
 	const struct ftnd_s *const base = (const struct ftnd_s*)t;
-	uint32_t ro = t->root;
+	ftnd_t ro = t->root;
 	int cmp;
 
 	while (ro && (cmp = rb_cmp(fact, base[ro].fact))) {
@@ -366,7 +368,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 {
 	struct ftnd_s *const restrict base = (struct ftnd_s*)t;
 	struct {
-		uint32_t no;
+		ftnd_t no;
 		int cmp;
 	} path[sizeof(void*) << 4U], *pp = path;
 
@@ -387,13 +389,13 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 
 	/* unwind */
 	for (pp--; pp >= path; pp--) {
-		uint32_t cur = pp->no;
+		ftnd_t cur = pp->no;
 
 		if (pp->cmp < 0) {
-			uint32_t left = pp[1].no;
+			ftnd_t left = pp[1].no;
 			base[cur].left = left;
 			if (base[left].redp) {
-				uint32_t leftleft = base[left].left;
+				ftnd_t leftleft = base[left].left;
 				if (base[leftleft].redp) {
 					/* blacken leftleft */
 					base[leftleft].redp = 0U;
@@ -403,10 +405,10 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 				return;
 			}
 		} else /*if (cmp > 0)*/ {
-			uint32_t rght = pp[1].no;
+			ftnd_t rght = pp[1].no;
 			base[cur].rght = rght;
 			if (base[rght].redp) {
-				uint32_t left = base[cur].left;
+				ftnd_t left = base[cur].left;
 				if (base[left].redp) {
 					/* split 4-node */
 					base[left].redp = 0U;
@@ -414,7 +416,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 					base[cur].redp = 1U;
 				} else {
 					/* lean left */
-					uint32_t tmp;
+					ftnd_t tmp;
 
 					tmp = rbtn_rot_left(t, cur);
 					base[tmp].redp = base[cur].redp;
@@ -456,7 +458,7 @@ fini_ftmap(ftmap_t UNUSED(m))
 static inline mut_fof_t*
 ftmap_get(ftmap_t m, mut_oid_t fact)
 {
-	uint32_t ro = rb_search(m->tree, fact);
+	ftnd_t ro = rb_search(m->tree, fact);
 
 	if (UNLIKELY(!ro)) {
 		return NULL;
