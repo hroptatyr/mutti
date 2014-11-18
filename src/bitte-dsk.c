@@ -275,13 +275,14 @@ struct fttr_s {
 };
 
 /* left accessors */
-static inline struct ftnd_s*
-rbt_node_new(struct ftnd_s *restrict base, ftnd_t of)
+static inline void
+rb_init_node(struct ftnd_s *restrict base, ftnd_t of, mut_oid_t fact)
 {
+	base[of].fact = fact;
 	base[of].left = 0U;
 	base[of].rght = 0U;
 	base[of].redp = 1U;
-	return base + of;
+	return;
 }
 
 static inline void
@@ -364,7 +365,7 @@ rb_search(const struct fttr_s *t, mut_oid_t fact)
 }
 
 static void
-rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
+rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 {
 	struct ftnd_s *const restrict base = (struct ftnd_s*)t;
 	struct {
@@ -375,7 +376,7 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 	/* wind */
 	path->no = t->root;
 	for (pp->no = t->root; pp->no; pp++) {
-		int cmp = pp->cmp = rb_cmp(fn->fact, base[pp->no].fact);
+		int cmp = pp->cmp = rb_cmp(fact, base[pp->no].fact);
 
 		assert(cmp != 0);
 		if (cmp < 0) {
@@ -385,7 +386,9 @@ rb_insert(struct fttr_s *restrict t, struct ftnd_s *restrict fn)
 		}
 	}
 	/* invariant: pp->no == 0U */
-	pp->no = fn - base;
+	pp->no = nd;
+	/* also assign fact and init the node */
+	rb_init_node(base, nd, fact);
 
 	/* unwind */
 	for (pp--; pp >= path; pp--) {
@@ -455,6 +458,12 @@ fini_ftmap(ftmap_t UNUSED(m))
 	return;
 }
 
+static ftnd_t
+ftmap_make_node(ftmap_t m)
+{
+	return ++m->tree->nfacts;
+}
+
 static inline mut_fof_t*
 ftmap_get(ftmap_t m, mut_oid_t fact)
 {
@@ -469,11 +478,9 @@ ftmap_get(ftmap_t m, mut_oid_t fact)
 static inline mut_fof_t*
 ftmap_put(ftmap_t m, mut_oid_t fact)
 {
-	struct ftnd_s *f =
-		rbt_node_new((struct ftnd_s*)m->tree, ++m->tree->nfacts);
+	ftnd_t nd = ftmap_make_node(m);
 
-	f->fact = fact;
-	rb_insert(m->tree, f);
+	rb_insert(m->tree, nd, fact);
 	return m->fof + m->tree->nfacts;
 }
 
