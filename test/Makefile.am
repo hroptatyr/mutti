@@ -92,5 +92,8 @@ rolf_pump_LDADD = $(mutti_LIBS)
 check_PROGRAMS += rolf-pump-bdb
 rolf_pump_bdb_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
 rolf_pump_bdb_LDADD = $(mutti_LIBS)
+check_PROGRAMS += rolf-pump-dsk
+rolf_pump_dsk_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
+rolf_pump_dsk_LDADD = $(mutti_LIBS)
 
 ## Makefile.am ends here
