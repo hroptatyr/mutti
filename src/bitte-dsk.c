@@ -462,7 +462,9 @@ fini_ftmap(ftmap_t UNUSED(m))
 static ftnd_t
 ftmap_make_node(ftmap_t m)
 {
-	return m->nfacts++;
+	ftnd_t res = m->nfacts++;
+	assert(res < (ftnd_t)NXPP);
+	return res;
 }
 
 static inline mut_fof_t*
@@ -767,6 +769,34 @@ _close(mut_stor_t s)
 }
 
 static int
+_extend(_stor_t _s)
+{
+/* munmap current page, extend the file and map a new current page */
+	munmap(_s->curp, PGSZ);
+	_s->curp = NULL;
+
+	/* calc new size */
+	with (const off_t ol = _s->ntrans / NXPP * PGSZ, nu = ol + PGSZ) {
+		void *curp;
+
+		if (UNLIKELY(ftruncate(_s->fd, nu) < 0)) {
+			return -1;
+		}
+
+		/* load the trunc'd page to scribble in */
+		curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, _s->fd, ol);
+		if (UNLIKELY(curp == MAP_FAILED)) {
+			return -1;
+		}
+
+		/* otherwise this is the latest shit */
+		_s->curp = curp;
+		init_ftmap(&_s->ftm, _s->curp->fht, _s->curp->fof);
+	}
+	return 0;
+}
+
+static int
 _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 {
 	_stor_t _s = (_stor_t)s;
@@ -783,6 +813,10 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->curp->valids[it] = valid;
 
 		ftmap_put_last(&_s->ftm, fact, t, it);
+	}
+	if (UNLIKELY(!(_s->ntrans % NXPP))) {
+		/* current page needs materialising */
+		_extend(_s);
 	}
 	return 0;
 }
