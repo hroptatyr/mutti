@@ -408,7 +408,7 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 				return;
 			}
 		} else /*if (cmp > 0)*/ {
-			ftnd_t rght = pp[1].no;
+			ftnd_t rght = pp[1U].no;
 			base[cur].rght = rght;
 			if (base[rght].redp) {
 				ftnd_t left = base[cur].left;
