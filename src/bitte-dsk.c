@@ -290,10 +290,8 @@ struct ftnd_s {
 static inline void
 rb_init_node(struct ftnd_s *restrict base, ftnd_t of, mut_oid_t fact)
 {
+	memset(base + of, -1, sizeof(*base));
 	base[of].fact = fact;
-	base[of].left = FTND_NIL;
-	base[of].rght = FTND_NIL;
-	base[of].redp = 1U;
 	return;
 }
 
