@@ -321,28 +321,6 @@ rbtn_last(const struct fttr_s *t)
 	return r;
 }
 
-static ftnd_t
-rbtn_rot_left(struct fttr_s *restrict t, ftnd_t node)
-{
-	struct ftnd_s *const base = t->base;
-	ftnd_t res = base[node].rght;
-
-	base[node].rght = base[res].left;
-	base[res].left = node;
-	return res;
-}
-
-static ftnd_t
-rbtn_rot_rght(struct fttr_s *restrict t, ftnd_t node)
-{
-	struct ftnd_s *const base = t->base;
-	ftnd_t res = base[node].left;
-
-	base[node].left = base[res].rght;
-	base[res].rght = node;
-	return res;
-}
-
 static inline __attribute__((const, pure)) int
 rb_cmp(mut_oid_t a, mut_oid_t b)
 {
@@ -375,6 +353,22 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 		int cmp;
 	} path[sizeof(void*) << 4U], *pp = path;
 
+#define rbtn_rot_left(base, nd)				\
+	({						\
+		ftnd_t __res = base[nd].rght;		\
+		base[nd].rght = base[__res].left;	\
+		base[__res].left = nd;			\
+		__res;					\
+	})
+
+#define rbtn_rot_rght(base, nd)				\
+	({						\
+		ftnd_t __res = base[nd].left;		\
+		base[nd].left = base[__res].rght;	\
+		base[__res].rght = nd;			\
+		__res;					\
+	})
+
 	/* wind */
 	for (pp->no = t->root; !FTND_NIL_P(pp->no); pp++) {
 		int cmp = pp->cmp = rb_cmp(fact, base[pp->no].fact);
@@ -403,7 +397,7 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 				if (base[leftleft].redp) {
 					/* blacken leftleft */
 					base[leftleft].redp = 0U;
-					cur = rbtn_rot_rght(t, cur);
+					cur = rbtn_rot_rght(base, cur);
 				}
 			} else {
 				return;
@@ -422,7 +416,7 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 					/* lean left */
 					ftnd_t tmp;
 
-					tmp = rbtn_rot_left(t, cur);
+					tmp = rbtn_rot_left(base, cur);
 					base[tmp].redp = base[cur].redp;
 					base[cur].redp = 1U;
 					cur = tmp;
@@ -433,6 +427,8 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 		}
 		pp->no = cur;
 	}
+#undef rbtn_rot_left
+#undef rbtn_rot_rght
 	/* set root and paint it black */
 	t->root = path->no;
 	base[t->root].redp = 0U;
