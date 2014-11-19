@@ -767,6 +767,9 @@ _close(mut_stor_t s)
 		_s->cachp[i] = NULL;
 		_s->cachn[i] = 0U;
 	}
+	if (s != NULL) {
+		free(_s);
+	}
 	return;
 }
 
