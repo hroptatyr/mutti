@@ -390,14 +390,11 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 		ftnd_t cur = pp->no;
 
 		if (pp->cmp < 0) {
-			ftnd_t left = pp[1U].no;
+			ftnd_t left = pp[1].no;
 			base[cur].left = left;
 			if (base[left].redp) {
 				ftnd_t leftleft = base[left].left;
-
-				if (UNLIKELY(FTND_NIL_P(leftleft))) {
-					;
-				} else if (base[leftleft].redp) {
+				if (base[leftleft].redp) {
 					/* blacken leftleft */
 					base[leftleft].redp = 0U;
 					cur = rbtn_rot_rght(base, cur);
@@ -410,10 +407,7 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 			base[cur].rght = rght;
 			if (base[rght].redp) {
 				ftnd_t left = base[cur].left;
-
-				if (UNLIKELY(FTND_NIL_P(left))) {
-					;
-				} else if (base[left].redp) {
+				if (base[left].redp) {
 					/* split 4-node */
 					base[left].redp = 0U;
 					base[rght].redp = 0U;
