@@ -312,7 +312,7 @@ rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 	if (LIKELY(s->depth)) {
 		ftnd_t nd = s->n[--s->depth];
 
-		if (!(s->k ^= 1U)) {
+		if ((s->k ^= 1U)) {
 			rbti_fill(s, t, t->base[nd].rght);
 		}
 		return t->base[nd].fact;
