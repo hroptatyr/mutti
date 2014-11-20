@@ -106,13 +106,6 @@ struct page_s {
 	mut_fof_t fof[NXPP];
 };
 
-typedef struct ftmap_s {
-	size_t root;
-	struct ftnd_s *base;
-	size_t nfacts;
-	mut_fof_t *bfof;
-} *ftmap_t;
-
 /* we promised to define the mut_stor_s struct */
 typedef struct _stor_s {
 	struct mut_stor_s super;
@@ -121,8 +114,8 @@ typedef struct _stor_s {
 	int fd;
 	/* current page */
 	struct page_s *restrict curp;
-	/* fact-trans map */
-	struct ftmap_s ftm;
+	/* fact-trans map, laters */
+	struct ftmap_s *ftm;
 	/* page cache */
 	const struct page_s *cachp[64U];
 	mut_pno_t cachn[64U];
@@ -276,11 +269,6 @@ typedef int32_t ftnd_t;
 #define FTND_NIL	((ftnd_t)-1)
 #define FTND_NIL_P(x)	(!~(x))
 
-struct fttr_s {
-	size_t root;
-	struct ftnd_s *base;
-};
-
 struct ftnd_s {
 	mut_oid_t fact;
 	ftnd_t left;
@@ -293,13 +281,15 @@ struct ftnd_s {
 #endif	/* WORDS_BIGENDIAN */
 };
 
-static inline void
-rb_init_node(struct ftnd_s *restrict base, ftnd_t of, mut_oid_t fact)
-{
-	memset(base + of, -1, sizeof(*base));
-	base[of].fact = fact;
-	return;
-}
+struct fttr_s {
+	/* mimic a struct ftnd_s here */
+	struct {
+		mut_oid_t nfacts;
+		ftnd_t root;
+		ftnd_t pad;
+	};
+	struct ftnd_s base[];
+};
 
 static ftnd_t
 rbtn_first(const struct fttr_s *t)
@@ -389,7 +379,7 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 	/* invariant: pp->no == NIL */
 	pp->no = nd;
 	/* also assign fact and init the node */
-	rb_init_node(base, nd, fact);
+	base[nd].fact = fact;
 
 	/* unwind */
 	for (pp--; pp >= path; pp--) {
@@ -443,26 +433,47 @@ rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
 
 
 /* ftmaps on top of red-black trees */
+typedef struct ftmap_s {
+	size_t zfacts;
+	mut_fof_t *fof;
+	/* vla! */
+	struct fttr_s rbt;
+} *ftmap_t;
+
 static int
-init_ftmap(ftmap_t m, void *base, void *bfof)
+clr_ftmap(ftmap_t m)
 {
-	m->root = (size_t)-1ULL;
-	m->base = base;
-	m->nfacts = 0U;
-	m->bfof = bfof;
+	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
+	m->rbt.nfacts = 0U;
 	return 0;
 }
 
-static void
-fini_ftmap(ftmap_t UNUSED(m))
+static ftmap_t
+make_ftmap(mut_fof_t *fof, size_t nnd)
 {
+	ftmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+
+	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	}
+	/* go ahead initialising */
+	res->zfacts = nnd;
+	res->fof = fof;
+	clr_ftmap(res);
+	return res;
+}
+
+static void
+free_ftmap(ftmap_t m)
+{
+	free(m);
 	return;
 }
 
 static ftnd_t
 ftmap_make_node(ftmap_t m)
 {
-	ftnd_t res = m->nfacts++;
+	ftnd_t res = m->rbt.nfacts++;
 	assert(res < (ftnd_t)NXPP);
 	return res;
 }
@@ -470,12 +481,12 @@ ftmap_make_node(ftmap_t m)
 static inline mut_fof_t*
 ftmap_get(ftmap_t m, mut_oid_t fact)
 {
-	ftnd_t ro = rb_search((struct fttr_s*)m, fact);
+	ftnd_t ro = rb_search(&m->rbt, fact);
 
 	if (UNLIKELY(FTND_NIL_P(ro))) {
 		return NULL;
 	}
-	return m->bfof + ro;
+	return m->fof + ro;
 }
 
 static inline mut_fof_t*
@@ -483,8 +494,8 @@ ftmap_put(ftmap_t m, mut_oid_t fact)
 {
 	ftnd_t nd = ftmap_make_node(m);
 
-	rb_insert((struct fttr_s*)m, nd, fact);
-	return m->bfof + nd;
+	rb_insert(&m->rbt, nd, fact);
+	return m->fof + nd;
 }
 
 static __attribute__((nonnull(1), flatten)) mut_tid_t
@@ -528,7 +539,7 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
-	mut_tid_t t = ftmap_get_last(&s->ftm, fact);
+	mut_tid_t t = ftmap_get_last(s->ftm, fact);
 
 	if (TID_NOT_FOUND_P(t)) {
 		/* must be dead */
@@ -742,7 +753,7 @@ _open(const char *fn, int fl)
 	/* quickly guess the number of transactions */
 	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
 	/* get some more initialisation work done */
-	init_ftmap(&res->ftm, res->curp->fht, res->curp->fof);
+	res->ftm = make_ftmap(res->curp->fof, NXPP);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
@@ -755,7 +766,7 @@ _close(mut_stor_t s)
 	_stor_t _s = (_stor_t)s;
 
 	/* finalise the ftmap */
-	fini_ftmap(&_s->ftm);
+	free_ftmap(_s->ftm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
 	/* munmap any cached pages */
@@ -794,7 +805,8 @@ _extend(_stor_t _s)
 
 		/* otherwise this is the latest shit */
 		_s->curp = curp;
-		init_ftmap(&_s->ftm, _s->curp->fht, _s->curp->fof);
+		clr_ftmap(_s->ftm);
+		_s->ftm->fof = _s->curp->fof;
 	}
 	return 0;
 }
@@ -815,7 +827,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = valid;
 
-		ftmap_put_last(&_s->ftm, fact, t, it);
+		ftmap_put_last(_s->ftm, fact, t, it);
 	}
 	if (UNLIKELY(!(_s->ntrans % NXPP))) {
 		/* current page needs materialising */
@@ -828,7 +840,7 @@ static int
 _rem(mut_stor_t s, mut_oid_t fact)
 {
 	_stor_t _s = (_stor_t)s;
-	const mut_tid_t t = ftmap_get_last(&_s->ftm, fact);
+	const mut_tid_t t = ftmap_get_last(_s->ftm, fact);
 
 	if (TID_NOT_FOUND_P(t)) {
 		/* he's dead already */
@@ -845,7 +857,7 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = echs_nul_range();
 
-		ftmap_put_last(&_s->ftm, fact, now, it);
+		ftmap_put_last(_s->ftm, fact, now, it);
 	}
 	return 0;
 }
@@ -873,7 +885,7 @@ _supersede(
 	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
 	_stor_t _s = (_stor_t)s;
-	const mut_tid_t ot = ftmap_get_last(&_s->ftm, old);
+	const mut_tid_t ot = ftmap_get_last(_s->ftm, old);
 
 #if 0
 	if (TID_NOT_FOUND_P(ot)) {
