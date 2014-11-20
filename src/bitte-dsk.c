@@ -91,12 +91,18 @@ typedef struct {
 	mut_tid_t last;
 } mut_fof_t;
 
+/* we have to be NXPP * sizeof(echs_instant_t) long */
+struct pphdr_s {
+	mut_oid_t space[NXPP];
+};
+
 /* this is one page in our file */
 struct page_s {
+	struct pphdr_s hdr;
 	echs_instant_t trans[NXPP];
-	mut_oid_t facts[NXPP];
 	echs_range_t valids[NXPP];
-	mut_oid_t fht[NXPP + NXPP];
+	mut_oid_t facts[NXPP];
+	mut_oid_t ftm[NXPP];
 	mut_fof_t fof[NXPP];
 };
 
