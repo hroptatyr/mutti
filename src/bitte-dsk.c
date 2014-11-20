@@ -291,31 +291,40 @@ struct fttr_s {
 	struct ftnd_s base[];
 };
 
-static ftnd_t
-rbtn_first(const struct fttr_s *t)
-{
-	const struct ftnd_s *const base = t->base;
-	ftnd_t r;
+struct rbstk_s {
+	uint32_t depth;
+	uint32_t k;
+	ftnd_t n[sizeof(void*) << 4U];
+};
 
-	if (UNLIKELY(FTND_NIL_P(r = t->root))) {
-		return 0U;
-	}
-	for (ftnd_t tmp; (tmp = base[r].left); r = tmp);
-	return r;
+static void
+rbti_fill(struct rbstk_s *restrict s, const struct fttr_s *t, ftnd_t of)
+{
+/* treat OF as root and fill S with left nodes */
+	const struct ftnd_s *const base = t->base;
+	for (; !FTND_NIL_P(of); s->n[s->depth++] = of, of = base[of].left);
+	return;
 }
 
-static ftnd_t
-rbtn_last(const struct fttr_s *t)
+static inline mut_oid_t
+rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 {
-	const struct ftnd_s *const base = t->base;
-	ftnd_t r;
+	if (LIKELY(s->depth)) {
+		ftnd_t nd = s->n[--s->depth];
 
-	if (UNLIKELY(FTND_NIL_P(r = t->root))) {
-		return 0U;
+		if (!(s->k ^= 1U)) {
+			rbti_fill(s, t, t->base[nd].rght);
+		}
+		return t->base[nd].fact;
 	}
-	for (ftnd_t tmp; (tmp = base[r].rght); r = tmp);
-	return r;
+	return MUT_NUL_OID;
 }
+
+#define FOREACH_RBN(_nd, _rbt)						\
+	with (mut_oid_t _nd)						\
+		with (struct rbstk_s __stk = {0U})			\
+		for (rbti_fill(&__stk, _rbt, (_rbt)->root);		\
+		     (_nd = rbti_pop(&__stk, _rbt));)
 
 static inline __attribute__((const, pure)) int
 rb_cmp(mut_oid_t a, mut_oid_t b)
@@ -531,6 +540,15 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 		f->_1st = last;
 	}
 	f->last = last;
+	return 0;
+}
+
+static int
+bang_ftmap(mut_oid_t *restrict tgt, const struct ftmap_s *m)
+{
+	FOREACH_RBN(f, &m->rbt) {
+		*tgt++ = f;
+	}
 	return 0;
 }
 
@@ -760,11 +778,23 @@ clo:
 	return NULL;
 }
 
+static int
+_materialise(_stor_t _s)
+{
+/* bring current page into form for permanent storage */
+	int rc = 0;
+
+	rc += bang_ftmap(_s->curp->ftm, _s->ftm);
+	return rc;
+}
+
 static void
 _close(mut_stor_t s)
 {
 	_stor_t _s = (_stor_t)s;
 
+	/* materialise */
+	_materialise(_s);
 	/* finalise the ftmap */
 	free_ftmap(_s->ftm);
 	/* munmap current page */
@@ -814,6 +844,7 @@ static int
 _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 {
 	_stor_t _s = (_stor_t)s;
+	int rc = -1;
 
 	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		return -1;
@@ -830,9 +861,10 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 	}
 	if (UNLIKELY(!(_s->ntrans % NXPP))) {
 		/* current page needs materialising */
-		_extend(_s);
+		rc += _materialise(_s);
+		rc += _extend(_s);
 	}
-	return 0;
+	return rc;
 }
 
 static int
