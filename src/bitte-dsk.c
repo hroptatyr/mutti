@@ -441,8 +441,9 @@ typedef struct ftmap_s {
 } *ftmap_t;
 
 static int
-clr_ftmap(ftmap_t m)
+clr_ftmap(ftmap_t m, mut_fof_t *fof)
 {
+	m->fof = fof;
 	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
 	m->rbt.nfacts = 0U;
 	return 0;
@@ -458,8 +459,7 @@ make_ftmap(mut_fof_t *fof, size_t nnd)
 	}
 	/* go ahead initialising */
 	res->zfacts = nnd;
-	res->fof = fof;
-	clr_ftmap(res);
+	clr_ftmap(res, fof);
 	return res;
 }
 
@@ -805,8 +805,7 @@ _extend(_stor_t _s)
 
 		/* otherwise this is the latest shit */
 		_s->curp = curp;
-		clr_ftmap(_s->ftm);
-		_s->ftm->fof = _s->curp->fof;
+		clr_ftmap(_s->ftm, _s->curp->fof);
 	}
 	return 0;
 }
