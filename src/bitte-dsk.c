@@ -648,37 +648,84 @@ tid_found:
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
+/* we do a backward-forward scan:
+ * on a given page, look for the first fiddle with FACT,
+ * if > AS_OF, go back one page
+ * if <= AS_OF traverse forwards to find the FIRST_AFTER */
+	const mut_fof_t *fof = ftmap_get(s->ftm, fact);
 	mut_tid_t i_last_before = TID_NOT_FOUND;
 	mut_tid_t i_first_after = TID_NOT_FOUND;
-	mut_tid_t i = 0U;
+	echs_instant_t ti_before;
+	echs_instant_t ti_after;
 
-	for (; i < _stor_ntrans(s) &&
-		     echs_instant_le_p(_stor_get_trans(s, i), as_of); i++) {
-		if (fact == _stor_get_fact(s, i)) {
-			i_last_before = i;
+	if (fof != NULL) {
+		/* lucky! */
+		i_last_before = fof->_1st;
+		ti_before = _stor_get_trans(s, i_last_before);
+
+		if (echs_instant_le_p(ti_before, as_of)) {
+			/* this is too good to be true */
+			goto fwd_scan;
 		}
 	}
-	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
-	 * the last fiddle with FACT before AS_OF */
-	if (TID_NOT_FOUND_P(i_last_before)) {
-		/* must be dead */
-		return ECHS_NUL_BITMP;
-	}
-	/* keep scanning, because the fact might have been superseded by
-	 * a more recent transaction */
-	for (; i < _stor_ntrans(s); i++) {
-		if (fact == _stor_get_fact(s, i)) {
-			i_first_after = i;
-			break;
+	/* either FACT isn't featured on the current page or
+	 * AS_OF < TRANS(i_last_before)
+	 * either way, we have to consult the previous pages */
+	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
+		const struct page_s *p = _stor_load_page(s, pi);
+		echs_instant_t ti;
+		mut_tid_t i;
+
+		if ((fof = page_ftm_get(p, fact)) == NULL) {
+			continue;
 		}
+		/* otherwise let's see if we can initiate the forward scan */
+		i_last_before = fof->_1st;
+		ti_before = _stor_get_trans(s, i_last_before);
+
+		if (!echs_instant_le_p(ti_before, as_of)) {
+			/* maybe we're lucky next time */
+			continue;
+		}
+
+	fwd_scan:
+		if (i_last_before == fof->last) {
+			/* oh my god, we nailed it */
+			goto found;
+		}
+		/* scan forwards, we know that f->last >= AS_OF
+		 * otherwise we'd be in _get_as_of_now() */
+		for (i = i_last_before;
+		     i < fof->last &&
+			     (ti = _stor_get_trans(s, i),
+			      echs_instant_le_p(ti, as_of)); i++) {
+			if (fact == _stor_get_fact(s, i)) {
+				i_last_before = i;
+				ti_before = ti;
+			}
+		}
+		/* found the definite before trans
+		 * keep scanning, because the fact might have been
+		 * superseded by a more recent transaction */
+		for (; i < fof->last; i++) {
+			if (fact == _stor_get_fact(s, i)) {
+				i_first_after = i;
+				ti_after = _stor_get_trans(s, i);
+				break;
+			}
+		}
+		goto found;
 	}
+	return ECHS_NUL_BITMP;
+
+found:
 	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
 	 * the next fiddle with FACT on or after AS_OF */
 	if (TID_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
 			_stor_get_valid(s, i_last_before),
-			ECHS_RANGE_FROM(_stor_get_trans(s, i_last_before))
+			ECHS_RANGE_FROM(ti_before)
 		};
 	}
 
@@ -686,10 +733,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
 		_stor_get_valid(s, i_last_before),
-		(echs_range_t){
-			_stor_get_trans(s, i_last_before),
-			_stor_get_trans(s, i_first_after)
-		}
+		(echs_range_t){ti_before, ti_after},
 	};
 }
 
