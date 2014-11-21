@@ -62,6 +62,8 @@ main(int argc, char *const argv[])
 	char *line = NULL;
 	size_t llen = 0UL;
 
+	echs_set_now(dt_strp("2014-10-29T14:23:41.507", NULL));
+
 	assert(s != NULL);
 	for (ssize_t nrd; (nrd = getline(&line, &llen, stdin)) > 0;) {
 		char *on;
@@ -82,12 +84,18 @@ main(int argc, char *const argv[])
 
 		bitte_put(s, x, r);
 	}
+
+	echs_instant_t this = dt_strp("2014-10-29T14:25:41.507", NULL);
+	echs_set_now(dt_strp("2014-10-29T14:29:41.507", NULL));
+
 	/* try a simple get */
 	for (int i = 1; i < argc; i++) {
 		mut_oid_t x;
 
 		if ((x = strtoul(argv[i], NULL, 0))) {
-			pr_bitmp(bitte_get(s, x, ECHS_SOON));
+			fprintf(stdout, "fact %lu\t", x);
+			fflush(stdout);
+			pr_bitmp(bitte_get(s, x, this));
 		}
 	}
 
