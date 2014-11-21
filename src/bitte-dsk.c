@@ -306,7 +306,7 @@ rbti_fill(struct rbstk_s *restrict s, const struct fttr_s *t, ftnd_t of)
 	return;
 }
 
-static inline mut_oid_t
+static inline ftnd_t
 rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 {
 	if (LIKELY(s->depth)) {
@@ -315,16 +315,24 @@ rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 		if ((s->k ^= 1U)) {
 			rbti_fill(s, t, t->base[nd].rght);
 		}
-		return t->base[nd].fact;
+		return nd;
 	}
-	return MUT_NUL_OID;
+	return FTND_NIL;
 }
 
 #define FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _nd)						\
+	with (ftnd_t _nd)						\
 		with (struct rbstk_s __stk = {0U})			\
 		for (rbti_fill(&__stk, _rbt, (_rbt)->root);		\
-		     (_nd = rbti_pop(&__stk, _rbt));)
+		     !FTND_NIL_P(_nd = rbti_pop(&__stk, _rbt));)
+
+#define FOREACH_RBN_FACT(_nd, _f, _rbt)					\
+	FOREACH_RBN(_nd, _rbt)						\
+	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
+
+#define FOREACH_FACT(_f, _rbt)						\
+	FOREACH_RBN(_nd, _rbt)						\
+	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
 
 static inline __attribute__((const, pure)) int
 rb_cmp(mut_oid_t a, mut_oid_t b)
@@ -450,31 +458,38 @@ typedef struct ftmap_s {
 } *ftmap_t;
 
 static int
-clr_ftmap(ftmap_t m, mut_fof_t *fof)
+clr_ftmap(ftmap_t m)
 {
-	m->fof = fof;
 	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
 	m->rbt.nfacts = 0U;
 	return 0;
 }
 
 static ftmap_t
-make_ftmap(mut_fof_t *fof, size_t nnd)
+make_ftmap(size_t nnd)
 {
 	ftmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *fof;
 
 	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((fof = malloc(nnd * sizeof(*res->fof))) == NULL)) {
+		free(res);
 		return NULL;
 	}
 	/* go ahead initialising */
 	res->zfacts = nnd;
-	clr_ftmap(res, fof);
+	res->fof = fof;
+	clr_ftmap(res);
 	return res;
 }
 
 static void
 free_ftmap(ftmap_t m)
 {
+	if (LIKELY(m->fof != NULL)) {
+		free(m->fof);
+	}
 	free(m);
 	return;
 }
@@ -544,10 +559,17 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 }
 
 static int
-bang_ftmap(mut_oid_t *restrict tgt, const struct ftmap_s *m)
+bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 {
-	FOREACH_RBN(f, &m->rbt) {
-		*tgt++ = f;
+	with (mut_oid_t *restrict tp = tgt->ftm) {
+		FOREACH_FACT(f, &m->rbt) {
+			*tp++ = f;
+		}
+	}
+	with (mut_fof_t *restrict fp = tgt->fof) {
+		FOREACH_RBN(n, &m->rbt) {
+			*fp++ = m->fof[n];
+		}
 	}
 	return 0;
 }
@@ -771,7 +793,7 @@ _open(const char *fn, int fl)
 	/* quickly guess the number of transactions */
 	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
 	/* get some more initialisation work done */
-	res->ftm = make_ftmap(res->curp->fof, NXPP);
+	res->ftm = make_ftmap(NXPP);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
@@ -784,7 +806,7 @@ _materialise(_stor_t _s)
 /* bring current page into form for permanent storage */
 	int rc = 0;
 
-	rc += bang_ftmap(_s->curp->ftm, _s->ftm);
+	rc += bang_ftmap(_s->curp, _s->ftm);
 	return rc;
 }
 
@@ -835,7 +857,7 @@ _extend(_stor_t _s)
 
 		/* otherwise this is the latest shit */
 		_s->curp = curp;
-		clr_ftmap(_s->ftm, _s->curp->fof);
+		clr_ftmap(_s->ftm);
 	}
 	return 0;
 }
