@@ -545,7 +545,7 @@ ftmap_get_first(ftmap_t m, mut_oid_t fact)
 }
 
 static int
-ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
+ftmap_put_last(ftmap_t m, mut_oid_t fact, mut_tid_t last)
 {
 	mut_fof_t *f = ftmap_get(m, fact);
 
@@ -575,16 +575,69 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 }
 
 
+/* ftmaps in materialised pages */
+static inline const mut_fof_t*
+page_ftm_get(const struct page_s *p, mut_oid_t fact)
+{
+/* a page always has NXPP facts in sorted order
+ * we now do a simple bsearch(3) till we find the right block
+ * a block coincides with the cacheline size (64b) */
+	uint_fast32_t lo = 0U;
+	uint_fast32_t hi = NXPP;
+
+	/* we want log(NXPP) - log(x) many steps, with x being
+	 * the number of facts in a 64B cacheline */
+	for (size_t i = NXPP / (64U / sizeof(fact)) - 1U; i; i >>= 1U) {
+		uint_fast32_t mid = (lo + hi) / 2U;
+
+		if (p->ftm[mid] >= fact) {
+			hi = mid;
+		} else {
+			lo = mid;
+		}
+	}
+	/* at last we just scan the whole cacheline, 8 mut_oid_t objects */
+	assert(hi - lo == 64U / sizeof(fact));
+	for (; lo < hi; lo++) {
+		if (p->ftm[lo] == fact) {
+			return p->fof + lo;
+		}
+	}
+	return NULL;
+}
+
+static __attribute__((nonnull(1), flatten)) mut_tid_t
+page_ftm_get_last(const struct page_s *p, mut_oid_t fact)
+{
+	const mut_fof_t *fof = page_ftm_get(p, fact);
+
+	if (fof == NULL) {
+		return TID_NOT_FOUND;
+	}
+	return fof->last;
+}
+
+
 /* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 	mut_tid_t t = ftmap_get_last(s->ftm, fact);
 
-	if (TID_NOT_FOUND_P(t)) {
-		/* must be dead */
-		return ECHS_NUL_BITMP;
+	if (!TID_NOT_FOUND_P(t)) {
+		goto tid_found;
 	}
+	/* time to hit the caches now */
+	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
+		const struct page_s *p = _stor_load_page(s, pi);
+
+		if (!TID_NOT_FOUND_P(t = page_ftm_get_last(p, fact))) {
+			goto tid_found;
+		}
+	}
+	return ECHS_NUL_BITMP;
+
+tid_found:
 	/* yay, dead or alive, it's in our books */
 	return (echs_bitmp_t){
 		_stor_get_valid(s, t),
@@ -595,37 +648,89 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
+/* we do a backward-forward scan:
+ * on a given page, look for the first fiddle with FACT,
+ * if > AS_OF, go back one page
+ * if <= AS_OF traverse forwards to find the FIRST_AFTER */
+	const mut_fof_t *fof = ftmap_get(s->ftm, fact);
 	mut_tid_t i_last_before = TID_NOT_FOUND;
 	mut_tid_t i_first_after = TID_NOT_FOUND;
-	mut_tid_t i = 0U;
+	echs_instant_t ti_before;
+	echs_instant_t ti_after;
 
-	for (; i < _stor_ntrans(s) &&
-		     echs_instant_le_p(_stor_get_trans(s, i), as_of); i++) {
-		if (fact == _stor_get_fact(s, i)) {
-			i_last_before = i;
+	if (fof != NULL) {
+		/* lucky! */
+		i_last_before = fof->_1st;
+		ti_before = _stor_get_trans(s, i_last_before);
+
+		if (echs_instant_le_p(ti_before, as_of)) {
+			if (i_last_before == fof->last) {
+				/* oh my god, we nailed it */
+				goto found;
+			}
+			/* knew it, it was too good to be true */
+			goto fwd_scan;
 		}
 	}
-	/* now I_LAST_BEFORE should hold FACT_NOT_FOUND or the index of
-	 * the last fiddle with FACT before AS_OF */
-	if (TID_NOT_FOUND_P(i_last_before)) {
-		/* must be dead */
-		return ECHS_NUL_BITMP;
-	}
-	/* keep scanning, because the fact might have been superseded by
-	 * a more recent transaction */
-	for (; i < _stor_ntrans(s); i++) {
-		if (fact == _stor_get_fact(s, i)) {
-			i_first_after = i;
-			break;
+	/* either FACT isn't featured on the current page or
+	 * AS_OF < TRANS(i_last_before)
+	 * either way, we have to consult the previous pages */
+	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
+		const struct page_s *p = _stor_load_page(s, pi);
+		echs_instant_t ti;
+		mut_tid_t i;
+
+		if ((fof = page_ftm_get(p, fact)) == NULL) {
+			continue;
 		}
+		/* otherwise let's see if we can initiate the forward scan */
+		i_last_before = fof->_1st;
+		ti_before = _stor_get_trans(s, i_last_before);
+
+		if (!echs_instant_le_p(ti_before, as_of)) {
+			/* maybe we're lucky next time
+			 * however we'll track this instance on the way down
+			 * so we don't have to look for the first_after
+			 * bound later on */
+			i_first_after = i_last_before;
+			ti_after = ti_before;
+			continue;
+		}
+
+	fwd_scan:
+		/* scan forwards, we know that f->last >= AS_OF
+		 * otherwise we'd be in _get_as_of_now() */
+		for (i = i_last_before;
+		     i < fof->last &&
+			     (ti = _stor_get_trans(s, i),
+			      echs_instant_le_p(ti, as_of)); i++) {
+			if (fact == _stor_get_fact(s, i)) {
+				i_last_before = i;
+				ti_before = ti;
+			}
+		}
+		/* found the definite before trans
+		 * keep scanning, because the fact might have been
+		 * superseded by a more recent transaction */
+		for (; i < fof->last; i++) {
+			if (fact == _stor_get_fact(s, i)) {
+				i_first_after = i;
+				ti_after = _stor_get_trans(s, i);
+				break;
+			}
+		}
+		goto found;
 	}
+	return ECHS_NUL_BITMP;
+
+found:
 	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
 	 * the next fiddle with FACT on or after AS_OF */
 	if (TID_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
 			_stor_get_valid(s, i_last_before),
-			ECHS_RANGE_FROM(_stor_get_trans(s, i_last_before))
+			ECHS_RANGE_FROM(ti_before)
 		};
 	}
 
@@ -633,10 +738,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
 		_stor_get_valid(s, i_last_before),
-		(echs_range_t){
-			_stor_get_trans(s, i_last_before),
-			_stor_get_trans(s, i_first_after)
-		}
+		(echs_range_t){ti_before, ti_after},
 	};
 }
 
@@ -698,7 +800,7 @@ _bitte_rtr(
 		     (t = _stor_get_trans(s, ti), echs_instant_le_p(t, as_of));
 	     ti++) {
 		const mut_oid_t f = _stor_get_fact(s, ti);
-		ftmap_put_last(s->cache + ci, f, t, ti);
+		ftmap_put_last(s->cache + ci, f, ti);
 	}
 
 	/* same as _bitte_rtr_as_of_now() now */
@@ -879,7 +981,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = valid;
 
-		ftmap_put_last(_s->ftm, fact, t, it);
+		ftmap_put_last(_s->ftm, fact, it);
 	}
 	if (UNLIKELY(!(_s->ntrans % NXPP))) {
 		/* current page needs materialising */
@@ -910,7 +1012,7 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = echs_nul_range();
 
-		ftmap_put_last(_s->ftm, fact, now, it);
+		ftmap_put_last(_s->ftm, fact, it);
 	}
 	return 0;
 }
@@ -965,7 +1067,7 @@ _supersede(
 			_s->tmln.facts[it] = old;
 			_s->tmln.valids[it] = nuv;
 
-			ftmap_put_last(&_s->live, old, t, it);
+			ftmap_put_last(&_s->live, old, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
@@ -976,7 +1078,7 @@ _supersede(
 			_s->tmln.facts[it] = new;
 			_s->tmln.valids[it] = valid;
 
-			ftmap_put_last(&_s->live, new, t, it);
+			ftmap_put_last(&_s->live, new, it);
 		}
 	}
 #endif
