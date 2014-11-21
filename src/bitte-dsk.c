@@ -559,10 +559,17 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 }
 
 static int
-bang_ftmap(mut_oid_t *restrict tgt, const struct ftmap_s *m)
+bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 {
-	FOREACH_FACT(f, &m->rbt) {
-		*tgt++ = f;
+	with (mut_oid_t *restrict tp = tgt->ftm) {
+		FOREACH_FACT(f, &m->rbt) {
+			*tp++ = f;
+		}
+	}
+	with (mut_fof_t *restrict fp = tgt->fof) {
+		FOREACH_RBN(n, &m->rbt) {
+			*fp++ = m->fof[n];
+		}
 	}
 	return 0;
 }
@@ -799,7 +806,7 @@ _materialise(_stor_t _s)
 /* bring current page into form for permanent storage */
 	int rc = 0;
 
-	rc += bang_ftmap(_s->curp->ftm, _s->ftm);
+	rc += bang_ftmap(_s->curp, _s->ftm);
 	return rc;
 }
 
