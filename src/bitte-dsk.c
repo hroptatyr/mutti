@@ -575,16 +575,69 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 }
 
 
+/* ftmaps in materialised pages */
+static inline mut_fof_t*
+page_ftm_get(const struct page_s *p, mut_oid_t fact)
+{
+/* a page always has NXPP facts in sorted order
+ * we now do a simple bsearch(3) till we find the right block
+ * a block coincides with the cacheline size (64b) */
+	uint_fast32_t lo = 0U;
+	uint_fast32_t hi = NXPP;
+
+	/* we want log(NXPP) - log(x) many steps, with x being
+	 * the number of facts in a 64B cacheline */
+	for (size_t i = NXPP / (64U / sizeof(fact)) - 1U; i; i >>= 1U) {
+		uint_fast32_t mid = (lo + hi) / 2U;
+
+		if (p->ftm[mid] >= fact) {
+			hi = mid;
+		} else {
+			lo = mid;
+		}
+	}
+	/* at last we just scan the whole cacheline, 8 mut_oid_t objects */
+	assert(hi - lo == 64U / sizeof(fact));
+	for (; lo < hi; lo++) {
+		if (p->ftm[lo] == fact) {
+			return p->fof + lo;
+		}
+	}
+	return NULL;
+}
+
+static __attribute__((nonnull(1), flatten)) mut_tid_t
+page_ftm_get_last(const struct page_s *p, mut_oid_t fact)
+{
+	mut_fof_t *fof = page_ftm_get(p, fact);
+
+	if (fof == NULL) {
+		return TID_NOT_FOUND;
+	}
+	return fof->last;
+}
+
+
 /* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 	mut_tid_t t = ftmap_get_last(s->ftm, fact);
 
-	if (TID_NOT_FOUND_P(t)) {
-		/* must be dead */
-		return ECHS_NUL_BITMP;
+	if (!TID_NOT_FOUND_P(t)) {
+		goto tid_found;
 	}
+	/* time to hit the caches now */
+	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
+		const struct page_s *p = _stor_load_page(s, pi);
+
+		if (!TID_NOT_FOUND_P(t = page_ftm_get_last(p, fact))) {
+			goto tid_found;
+		}
+	}
+	return ECHS_NUL_BITMP;
+
+tid_found:
 	/* yay, dead or alive, it's in our books */
 	return (echs_bitmp_t){
 		_stor_get_valid(s, t),
