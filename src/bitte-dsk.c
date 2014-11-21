@@ -576,7 +576,7 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 
 
 /* ftmaps in materialised pages */
-static inline mut_fof_t*
+static inline const mut_fof_t*
 page_ftm_get(const struct page_s *p, mut_oid_t fact)
 {
 /* a page always has NXPP facts in sorted order
@@ -609,7 +609,7 @@ page_ftm_get(const struct page_s *p, mut_oid_t fact)
 static __attribute__((nonnull(1), flatten)) mut_tid_t
 page_ftm_get_last(const struct page_s *p, mut_oid_t fact)
 {
-	mut_fof_t *fof = page_ftm_get(p, fact);
+	const mut_fof_t *fof = page_ftm_get(p, fact);
 
 	if (fof == NULL) {
 		return TID_NOT_FOUND;
