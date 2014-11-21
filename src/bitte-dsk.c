@@ -545,7 +545,7 @@ ftmap_get_first(ftmap_t m, mut_oid_t fact)
 }
 
 static int
-ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
+ftmap_put_last(ftmap_t m, mut_oid_t fact, mut_tid_t last)
 {
 	mut_fof_t *f = ftmap_get(m, fact);
 
@@ -698,7 +698,7 @@ _bitte_rtr(
 		     (t = _stor_get_trans(s, ti), echs_instant_le_p(t, as_of));
 	     ti++) {
 		const mut_oid_t f = _stor_get_fact(s, ti);
-		ftmap_put_last(s->cache + ci, f, t, ti);
+		ftmap_put_last(s->cache + ci, f, ti);
 	}
 
 	/* same as _bitte_rtr_as_of_now() now */
@@ -879,7 +879,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = valid;
 
-		ftmap_put_last(_s->ftm, fact, t, it);
+		ftmap_put_last(_s->ftm, fact, it);
 	}
 	if (UNLIKELY(!(_s->ntrans % NXPP))) {
 		/* current page needs materialising */
@@ -910,7 +910,7 @@ _rem(mut_stor_t s, mut_oid_t fact)
 		_s->curp->facts[it] = fact;
 		_s->curp->valids[it] = echs_nul_range();
 
-		ftmap_put_last(_s->ftm, fact, now, it);
+		ftmap_put_last(_s->ftm, fact, it);
 	}
 	return 0;
 }
@@ -965,7 +965,7 @@ _supersede(
 			_s->tmln.facts[it] = old;
 			_s->tmln.valids[it] = nuv;
 
-			ftmap_put_last(&_s->live, old, t, it);
+			ftmap_put_last(&_s->live, old, it);
 		}
 		/* new guy now */
 		if (new != MUT_NUL_OID) {
@@ -976,7 +976,7 @@ _supersede(
 			_s->tmln.facts[it] = new;
 			_s->tmln.valids[it] = valid;
 
-			ftmap_put_last(&_s->live, new, t, it);
+			ftmap_put_last(&_s->live, new, it);
 		}
 	}
 #endif
