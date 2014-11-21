@@ -82,6 +82,15 @@ main(int argc, char *const argv[])
 
 		bitte_put(s, x, r);
 	}
+	/* try a simple get */
+	for (int i = 1; i < argc; i++) {
+		mut_oid_t x;
+
+		if ((x = strtoul(argv[i], NULL, 0))) {
+			pr_bitmp(bitte_get(s, x, ECHS_SOON));
+		}
+	}
+
 	mut_stor_close(s);
 	if (line) {
 		free(line);
