@@ -139,8 +139,6 @@ dt_strp(const char *str, char **on)
 
 	/* check for the d/t separator */
 	switch (*sp++) {
-	case ' ':
-		/* time might be following */
 	case 'T':
 		/* time's following */
 		break;
