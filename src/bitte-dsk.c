@@ -458,31 +458,38 @@ typedef struct ftmap_s {
 } *ftmap_t;
 
 static int
-clr_ftmap(ftmap_t m, mut_fof_t *fof)
+clr_ftmap(ftmap_t m)
 {
-	m->fof = fof;
 	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
 	m->rbt.nfacts = 0U;
 	return 0;
 }
 
 static ftmap_t
-make_ftmap(mut_fof_t *fof, size_t nnd)
+make_ftmap(size_t nnd)
 {
 	ftmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *fof;
 
 	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((fof = malloc(nnd * sizeof(*res->fof))) == NULL)) {
+		free(res);
 		return NULL;
 	}
 	/* go ahead initialising */
 	res->zfacts = nnd;
-	clr_ftmap(res, fof);
+	res->fof = fof;
+	clr_ftmap(res);
 	return res;
 }
 
 static void
 free_ftmap(ftmap_t m)
 {
+	if (LIKELY(m->fof != NULL)) {
+		free(m->fof);
+	}
 	free(m);
 	return;
 }
@@ -779,7 +786,7 @@ _open(const char *fn, int fl)
 	/* quickly guess the number of transactions */
 	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
 	/* get some more initialisation work done */
-	res->ftm = make_ftmap(res->curp->fof, NXPP);
+	res->ftm = make_ftmap(NXPP);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
@@ -843,7 +850,7 @@ _extend(_stor_t _s)
 
 		/* otherwise this is the latest shit */
 		_s->curp = curp;
-		clr_ftmap(_s->ftm, _s->curp->fof);
+		clr_ftmap(_s->ftm);
 	}
 	return 0;
 }
