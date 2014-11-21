@@ -138,17 +138,15 @@ dt_strp(const char *str, char **on)
 	res.d = tmp;
 
 	/* check for the d/t separator */
-	switch (*sp++) {
-	case ' ':
-		/* time might be following */
+	switch (*sp) {
 	case 'T':
 		/* time's following */
+		sp++;
 		break;
 	case '\0':
 	default:
 		/* just the date, make it ECHS_ALL_DAY then aye */
 		res.H = ECHS_ALL_DAY;
-		sp--;
 		goto out;
 	}
 
