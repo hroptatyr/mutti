@@ -590,7 +590,7 @@ page_ftm_get(const struct page_s *p, mut_oid_t fact)
 	for (size_t i = NXPP / (64U / sizeof(fact)) - 1U; i; i >>= 1U) {
 		uint_fast32_t mid = (lo + hi) / 2U;
 
-		if (p->ftm[mid] >= fact) {
+		if (p->ftm[mid] > fact) {
 			hi = mid;
 		} else {
 			lo = mid;
