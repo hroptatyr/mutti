@@ -306,7 +306,7 @@ rbti_fill(struct rbstk_s *restrict s, const struct fttr_s *t, ftnd_t of)
 	return;
 }
 
-static inline mut_oid_t
+static inline ftnd_t
 rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 {
 	if (LIKELY(s->depth)) {
@@ -315,16 +315,24 @@ rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
 		if ((s->k ^= 1U)) {
 			rbti_fill(s, t, t->base[nd].rght);
 		}
-		return t->base[nd].fact;
+		return nd;
 	}
-	return MUT_NUL_OID;
+	return FTND_NIL;
 }
 
 #define FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _nd)						\
+	with (ftnd_t _nd)						\
 		with (struct rbstk_s __stk = {0U})			\
 		for (rbti_fill(&__stk, _rbt, (_rbt)->root);		\
-		     (_nd = rbti_pop(&__stk, _rbt));)
+		     !FTND_NIL_P(_nd = rbti_pop(&__stk, _rbt));)
+
+#define FOREACH_RBN_FACT(_nd, _f, _rbt)					\
+	FOREACH_RBN(_nd, _rbt)						\
+	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
+
+#define FOREACH_FACT(_f, _rbt)						\
+	FOREACH_RBN(_nd, _rbt)						\
+	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
 
 static inline __attribute__((const, pure)) int
 rb_cmp(mut_oid_t a, mut_oid_t b)
@@ -546,7 +554,7 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, echs_instant_t t, mut_tid_t last)
 static int
 bang_ftmap(mut_oid_t *restrict tgt, const struct ftmap_s *m)
 {
-	FOREACH_RBN(f, &m->rbt) {
+	FOREACH_FACT(f, &m->rbt) {
 		*tgt++ = f;
 	}
 	return 0;
