@@ -664,7 +664,11 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 		ti_before = _stor_get_trans(s, i_last_before);
 
 		if (echs_instant_le_p(ti_before, as_of)) {
-			/* this is too good to be true */
+			if (i_last_before == fof->last) {
+				/* oh my god, we nailed it */
+				goto found;
+			}
+			/* knew it, it was too good to be true */
 			goto fwd_scan;
 		}
 	}
@@ -684,15 +688,16 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 		ti_before = _stor_get_trans(s, i_last_before);
 
 		if (!echs_instant_le_p(ti_before, as_of)) {
-			/* maybe we're lucky next time */
+			/* maybe we're lucky next time
+			 * however we'll track this instance on the way down
+			 * so we don't have to look for the first_after
+			 * bound later on */
+			i_first_after = i_last_before;
+			ti_after = ti_before;
 			continue;
 		}
 
 	fwd_scan:
-		if (i_last_before == fof->last) {
-			/* oh my god, we nailed it */
-			goto found;
-		}
 		/* scan forwards, we know that f->last >= AS_OF
 		 * otherwise we'd be in _get_as_of_now() */
 		for (i = i_last_before;
