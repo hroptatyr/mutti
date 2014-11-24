@@ -274,197 +274,22 @@ _stor_get_valid(struct _stor_s *restrict s, mut_tid_t t)
 
 
 /* ftmap fiddling, materialised rb.h */
-typedef int32_t ftnd_t;
-
-#define FTND_NIL	((ftnd_t)-1)
-#define FTND_NIL_P(x)	(!~(x))
-
-struct ftnd_s {
-	mut_oid_t fact;
-	ftnd_t left;
-#if defined WORDS_BIGENDIAN
-	ftnd_t rght:31;
-	ftnd_t redp:1;
-#else  /* !WORDS_BIGENDIAN */
-	ftnd_t redp:1;
-	ftnd_t rght:31;
-#endif	/* WORDS_BIGENDIAN */
-};
-
-struct fttr_s {
-	/* mimic a struct ftnd_s here */
-	struct {
-		mut_oid_t nfacts;
-		ftnd_t root;
-		ftnd_t pad;
-	};
-	struct ftnd_s base[];
-};
-
-struct rbstk_s {
-	uint32_t depth;
-	uint32_t k;
-	ftnd_t n[sizeof(void*) << 4U];
-};
-
-static void
-rbti_fill(struct rbstk_s *restrict s, const struct fttr_s *t, ftnd_t of)
-{
-/* treat OF as root and fill S with left nodes */
-	const struct ftnd_s *const base = t->base;
-	for (; !FTND_NIL_P(of); s->n[s->depth++] = of, of = base[of].left);
-	return;
-}
-
-static inline ftnd_t
-rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
-{
-	if (LIKELY(s->depth)) {
-		ftnd_t nd = s->n[--s->depth];
-
-		if ((s->k ^= 1U)) {
-			rbti_fill(s, t, t->base[nd].rght);
-		}
-		return nd;
-	}
-	return FTND_NIL;
-}
-
-#define FOREACH_RBN(_nd, _rbt)						\
-	with (ftnd_t _nd)						\
-		with (struct rbstk_s __stk = {0U})			\
-		for (rbti_fill(&__stk, _rbt, (_rbt)->root);		\
-		     !FTND_NIL_P(_nd = rbti_pop(&__stk, _rbt));)
-
-#define FOREACH_RBN_FACT(_nd, _f, _rbt)					\
-	FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
-
-#define FOREACH_FACT(_f, _rbt)						\
-	FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
+#include "rb.h"
 
 static inline __attribute__((const, pure)) int
-rb_cmp(mut_oid_t a, mut_oid_t b)
+rb_cmp(mut_oid_t)(mut_oid_t a, mut_oid_t b)
 {
 	return a - b;
 }
 
-static ftnd_t
-rb_search(const struct fttr_s *t, mut_oid_t fact)
-{
-	const struct ftnd_s *const base = t->base;
-	ftnd_t ro = t->root;
-	int cmp;
+#include "rb-fact.c"
 
-	while (!FTND_NIL_P(ro) && (cmp = rb_cmp(fact, base[ro].fact))) {
-		if (cmp < 0) {
-			ro = base[ro].left;
-		} else /*if (cmp > 0)*/ {
-			ro = base[ro].rght;
-		}
-	}
-	return ro;
-}
-
-static void
-rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
-{
-	struct ftnd_s *const restrict base = t->base;
-	struct {
-		ftnd_t no;
-		int cmp;
-	} path[sizeof(void*) << 4U], *pp = path;
-
-#define rbtn_rot_left(base, nd)				\
-	({						\
-		ftnd_t __res = base[nd].rght;		\
-		base[nd].rght = base[__res].left;	\
-		base[__res].left = nd;			\
-		__res;					\
-	})
-
-#define rbtn_rot_rght(base, nd)				\
-	({						\
-		ftnd_t __res = base[nd].left;		\
-		base[nd].left = base[__res].rght;	\
-		base[__res].rght = nd;			\
-		__res;					\
-	})
-
-	/* wind */
-	for (pp->no = t->root; !FTND_NIL_P(pp->no); pp++) {
-		int cmp = pp->cmp = rb_cmp(fact, base[pp->no].fact);
-
-		assert(cmp != 0);
-		if (cmp < 0) {
-			pp[1U].no = base[pp->no].left;
-		} else /*if (cmp > 0)*/ {
-			pp[1U].no = base[pp->no].rght;
-		}
-	}
-	/* invariant: pp->no == NIL */
-	pp->no = nd;
-	/* also assign fact and init the node */
-	base[nd].fact = fact;
-
-	/* unwind */
-	for (pp--; pp >= path; pp--) {
-		ftnd_t cur = pp->no;
-
-		if (pp->cmp < 0) {
-			ftnd_t left = pp[1U].no;
-			base[cur].left = left;
-			if (base[left].redp) {
-				ftnd_t leftleft = base[left].left;
-				if (base[leftleft].redp) {
-					/* blacken leftleft */
-					base[leftleft].redp = 0U;
-					cur = rbtn_rot_rght(base, cur);
-				}
-			} else {
-				return;
-			}
-		} else /*if (cmp > 0)*/ {
-			ftnd_t rght = pp[1U].no;
-			base[cur].rght = rght;
-			if (base[rght].redp) {
-				ftnd_t left = base[cur].left;
-				if (base[left].redp) {
-					/* split 4-node */
-					base[left].redp = 0U;
-					base[rght].redp = 0U;
-					base[cur].redp = 1U;
-				} else {
-					/* lean left */
-					ftnd_t tmp;
-
-					tmp = rbtn_rot_left(base, cur);
-					base[tmp].redp = base[cur].redp;
-					base[cur].redp = 1U;
-					cur = tmp;
-				}
-			} else {
-				return;
-			}
-		}
-		pp->no = cur;
-	}
-#undef rbtn_rot_left
-#undef rbtn_rot_rght
-	/* set root and paint it black */
-	t->root = path->no;
-	base[t->root].redp = 0U;
-	return;
-}
-
-
 /* ftmaps on top of red-black trees */
 typedef struct ftmap_s {
 	size_t zfacts;
 	mut_fof_t *fof;
 	/* vla! */
-	struct fttr_s rbt;
+	struct RBTR_S(mut_oid_t) rbt;
 } *ftmap_t;
 
 static int
@@ -504,20 +329,20 @@ free_ftmap(ftmap_t m)
 	return;
 }
 
-static ftnd_t
+static rbnd_t
 ftmap_make_node(ftmap_t m)
 {
-	ftnd_t res = m->rbt.nfacts++;
-	assert(res < (ftnd_t)NXPP);
+	rbnd_t res = m->rbt.nfacts++;
+	assert(res < (rbnd_t)NXPP);
 	return res;
 }
 
 static inline mut_fof_t*
 ftmap_get(ftmap_t m, mut_oid_t fact)
 {
-	ftnd_t ro = rb_search(&m->rbt, fact);
+	rbnd_t ro = rb_search(mut_oid_t)(&m->rbt, fact);
 
-	if (UNLIKELY(FTND_NIL_P(ro))) {
+	if (UNLIKELY(RBND_NIL_P(ro))) {
 		return NULL;
 	}
 	return m->fof + ro;
@@ -526,9 +351,9 @@ ftmap_get(ftmap_t m, mut_oid_t fact)
 static inline mut_fof_t*
 ftmap_put(ftmap_t m, mut_oid_t fact)
 {
-	ftnd_t nd = ftmap_make_node(m);
+	rbnd_t nd = ftmap_make_node(m);
 
-	rb_insert(&m->rbt, nd, fact);
+	rb_insert(mut_oid_t)(&m->rbt, nd, fact);
 	return m->fof + nd;
 }
 
@@ -574,13 +399,13 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 	size_t nftm_facts;
 
 	with (mut_oid_t *restrict tp = tgt->ftm) {
-		FOREACH_FACT(f, &m->rbt) {
+		FOREACH_KEY(mut_oid_t, f, &m->rbt) {
 			*tp++ = f;
 		}
 		nftm_facts = tp - tgt->ftm;
 	}
 	with (mut_fof_t *restrict fp = tgt->fof) {
-		FOREACH_RBN(n, &m->rbt) {
+		FOREACH_RBN(n, mut_oid_t, &m->rbt) {
 			*fp++ = m->fof[n];
 		}
 	}

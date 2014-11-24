@@ -36,6 +36,8 @@ libmutti_la_LDFLAGS = $(AM_LDFLAGS)
 libmutti_la_LDFLAGS += -ldb
 libmutti_la_LDFLAGS += -lm
 EXTRA_libmutti_la_SOURCES += wikisort.c
+EXTRA_libmutti_la_SOURCES += rb.c rb.h
+BUILT_SOURCES += rb-fact.c
 
 pkginclude_HEADERS += instant.h
 pkginclude_HEADERS += range.h
@@ -59,6 +61,9 @@ SUFFIXES += .yucc
 .yuck.yucc:
 	$(AM_V_GEN) PATH=$(top_builddir)/build-aux:"$${PATH}" \
 		yuck$(EXEEXT) gen -o $@ $<
+
+rb-fact.c: rb.c
+	$(M4) -DRBKEY_T=mut_oid_t $< > $@
 
 ## Create preprocessor output (debugging purposes only)
 .c.i:
