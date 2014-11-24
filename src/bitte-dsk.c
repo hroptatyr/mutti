@@ -590,12 +590,12 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 }
 
 static int
-bang_hdr(struct page_s *restrict tgt)
+bang_hdr(struct page_s *restrict tgt, size_t ntrans)
 {
 /* better place for this? */
 	memcpy(tgt->hdr.magic, "MUT\002", 4U);
 	tgt->hdr.ver = 1;
-	tgt->hdr.ntrans = NXPP;
+	tgt->hdr.ntrans = ntrans % NXPP;
 	return 0;
 }
 
@@ -935,7 +935,7 @@ _materialise(_stor_t _s)
 
 	rc += bang_ftmap(_s->curp, _s->ftm);
 	/* header fiddling */
-	rc += bang_hdr(_s->curp);
+	rc += bang_hdr(_s->curp, _s->ntrans);
 	return rc;
 }
 
