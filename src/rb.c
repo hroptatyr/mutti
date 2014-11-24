@@ -62,7 +62,7 @@ rbti_pop(RBKEY_T)(struct rbstk_s *restrict s, const struct RBTR_S(RBKEY_T) *t)
 
 #define FOREACH_RBN_KEY(_nd, _t, _k, _rbt)				\
 	FOREACH_RBN(_nd, _t, _rbt)					\
-	with (_k = (_rbt)->base[_nd].key)
+	with (_t _k = (_rbt)->base[_nd].key)
 
 #define FOREACH_KEY(_t, _k, _rbt)					\
 	FOREACH_RBN(_nd, _t, _rbt)					\
