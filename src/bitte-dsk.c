@@ -93,7 +93,17 @@ typedef struct {
 
 /* we have to be NXPP * sizeof(echs_instant_t) long */
 struct pphdr_s {
-	mut_oid_t space[NXPP];
+	char magic[4U];
+	uint16_t ver;
+	uint16_t:16;
+	uint32_t ntrans;
+	uint32_t nftm_facts;
+
+	uint64_t nfacts;
+	uint32_t:32;
+	uint32_t:32;
+
+	mut_oid_t space[NXPP - 4U];
 };
 
 /* this is one page in our file */
@@ -574,6 +584,16 @@ bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 	return 0;
 }
 
+static int
+bang_hdr(struct page_s *restrict tgt)
+{
+/* better place for this? */
+	memcpy(tgt->hdr.magic, "MUT\002", 4U);
+	tgt->hdr.ver = 1;
+	tgt->hdr.ntrans = NXPP;
+	return 0;
+}
+
 
 /* ftmaps in materialised pages */
 static inline const mut_fof_t*
@@ -909,6 +929,8 @@ _materialise(_stor_t _s)
 	int rc = 0;
 
 	rc += bang_ftmap(_s->curp, _s->ftm);
+	/* header fiddling */
+	rc += bang_hdr(_s->curp);
 	return rc;
 }
 
