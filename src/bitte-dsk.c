@@ -571,16 +571,21 @@ ftmap_put_last(ftmap_t m, mut_oid_t fact, mut_tid_t last)
 static int
 bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
 {
+	size_t nftm_facts;
+
 	with (mut_oid_t *restrict tp = tgt->ftm) {
 		FOREACH_FACT(f, &m->rbt) {
 			*tp++ = f;
 		}
+		nftm_facts = tp - tgt->ftm;
 	}
 	with (mut_fof_t *restrict fp = tgt->fof) {
 		FOREACH_RBN(n, &m->rbt) {
 			*fp++ = m->fof[n];
 		}
 	}
+	/* fiddle with headers */
+	tgt->hdr.nftm_facts = nftm_facts;
 	return 0;
 }
 
@@ -603,11 +608,11 @@ page_ftm_get(const struct page_s *p, mut_oid_t fact)
  * we now do a simple bsearch(3) till we find the right block
  * a block coincides with the cacheline size (64b) */
 	uint_fast32_t lo = 0U;
-	uint_fast32_t hi = NXPP;
+	uint_fast32_t hi = p->hdr.nftm_facts;
 
-	/* we want log(NXPP) - log(x) many steps, with x being
-	 * the number of facts in a 64B cacheline */
-	for (size_t i = NXPP / (64U / sizeof(fact)) - 1U; i; i >>= 1U) {
+	/* perform a bsearch(3) until we're in the range of a
+	 * cacheline, then go to linear scanning */
+	while (hi - lo > 64U / sizeof(fact)) {
 		uint_fast32_t mid = (lo + hi) / 2U;
 
 		if (p->ftm[mid] > fact) {
@@ -616,8 +621,8 @@ page_ftm_get(const struct page_s *p, mut_oid_t fact)
 			lo = mid;
 		}
 	}
-	/* at last we just scan the whole cacheline, 8 mut_oid_t objects */
-	assert(hi - lo == 64U / sizeof(fact));
+	/* at last we just scan the whole cacheline, <=8 mut_oid_t objects */
+	assert(hi - lo <= 64U / sizeof(fact));
 	for (; lo < hi; lo++) {
 		if (p->ftm[lo] == fact) {
 			return p->fof + lo;
