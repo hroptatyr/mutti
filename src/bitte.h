@@ -65,6 +65,7 @@ typedef enum {
 /* this is what we can guarantee about mut_stor_s */
 struct mut_stor_s {
 	mut_stor_type_t type;
+	char data[];
 };
 
 #define MUT_CREAT	(O_CREAT)
