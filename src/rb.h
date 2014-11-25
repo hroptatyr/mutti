@@ -15,8 +15,7 @@ typedef int32_t rbnd_t;
 #define rb_cmp(x)	rb_ ## x ## _cmp
 
 struct rbstk_s {
-	uint32_t depth;
-	uint32_t k;
+	size_t depth;
 	rbnd_t n[sizeof(void*) << 4U];
 };
 

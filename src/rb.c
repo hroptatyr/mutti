@@ -46,9 +46,7 @@ rbti_pop(RBKEY_T)(struct rbstk_s *restrict s, const struct RBTR_S(RBKEY_T) *t)
 	if (LIKELY(s->depth)) {
 		rbnd_t nd = s->n[--s->depth];
 
-		if ((s->k ^= 1U)) {
-			rbti_fill(RBKEY_T)(s, t, t->base[nd].rght);
-		}
+		rbti_fill(RBKEY_T)(s, t, t->base[nd].rght);
 		return nd;
 	}
 	return RBND_NIL;
