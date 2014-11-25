@@ -169,6 +169,8 @@ typedef struct _stor_s {
 	struct page_s *restrict curp;
 	/* current transactions */
 	struct tfmap_s *tfm;
+	/* latest stamp */
+	echs_instant_t last;
 } *_stor_t;
 
 
@@ -390,6 +392,31 @@ _extend(_stor_t _s)
 }
 
 
+static __attribute__((nonnull(1))) echs_bitmp_t
+_get_as_of_now(_stor_t s, mut_oid_t fact)
+{
+/* retrieve one fact as of the current time stamp */
+	echs_range_t *v = tfmap_get(s->tfm, fact);
+	echs_instant_t t;
+
+	if (v != NULL) {
+		/* how lucky are we? */
+		t = s->last;
+		goto tid_found;
+	}
+	return ECHS_NUL_BITMP;
+tid_found:
+	return (echs_bitmp_t){*v, ECHS_RANGE_FROM(t)};
+}
+
+static __attribute__((nonnull(1))) echs_bitmp_t
+_get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
+{
+/* retrieve one fact as of the time stamp specified */
+	return ECHS_NUL_BITMP;
+}
+
+
 static mut_stor_t
 _open(const char *fn, int fl)
 {
@@ -461,20 +488,16 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 	with (echs_instant_t t = echs_now()) {
 		const size_t ntrans = _s->curp->hdr.ntrans;
 
-		if (LIKELY(ntrans)) {
-			echs_instant_t last = _s->curp->trans[ntrans - 1U];
-
-			if (!echs_instant_eq_p(t, last)) {
+		if (!echs_instant_eq_p(t, _s->last)) {
+			if (LIKELY(ntrans)) {
 				const size_t o = _s->curp->tof[ntrans - 1U];
 				size_t nbang = bang_tfmap(_s->curp, _s->tfm, o);
 
 				_s->curp->tof[ntrans - 1U] = nbang;
 				_s->curp->tof[ntrans] = nbang;
-				goto init_trans;
 			}
-		} else {
-		init_trans:
-			_s->curp->trans[_s->curp->hdr.ntrans++] = t;
+			/* otherwise just start the whole shebang */
+			_s->curp->trans[_s->curp->hdr.ntrans++] = _s->last = t;
 			clr_tfmap(_s->tfm);
 		}
 		/* bang */
@@ -497,20 +520,17 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 	_stor_t _s = (_stor_t)s;
 
-	if (UNLIKELY(fact == MUT_NUL_OID || !_s->curp->hdr.ntrans)) {
+	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
-	return ECHS_NUL_BITMP;
-#if 0
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if (true/*echs_instant_le_p(_s->live.trans, as_of)*/) {
+	else if (echs_instant_le_p(_s->last, as_of)) {
 		return _get_as_of_now(_s, fact);
 	}
 	/* otherwise proceed to scan */
 	return _get_as_of_then(_s, fact, as_of);
-#endif
 }
 
 static int
