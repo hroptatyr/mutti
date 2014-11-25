@@ -513,6 +513,42 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 #endif
 }
 
+static int
+_ssd(mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
+{
+/* ssd (supersede) is short for
+ * v <- _get(old)
+ * _put(old, (echs_range_t){[v.from, valid.from)})
+ * _put(new, valid) */
+	echs_bitmp_t v = _get(s, old, ECHS_SOON);
+	int rc = 0;
+
+	if (!echs_nul_range_p(v.valid)) {
+		return -1;
+	}
+	/* invalidate old cell */
+	rc += _put(s, old, (echs_range_t){v.valid.from, valid.from});
+	/* punch new cell */
+	rc += _put(s, new, valid);
+	return rc;
+}
+
+static int
+_rem(mut_stor_t s, mut_oid_t fact)
+{
+/* rem is short for
+ * v <- _get(fact)
+ * if (v) _put(fact, (echs_range_t){[)}) */
+	echs_bitmp_t v = _get(s, fact, ECHS_SOON);
+
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
+		return -1;
+	}
+	/* otherwise kill him */
+	return _put(s, fact, ECHS_NUL_RANGE);
+}
+
 
 /* this sums up our implementation */
 struct bitte_backend_s IN_DSO(backend) = {
@@ -520,6 +556,8 @@ struct bitte_backend_s IN_DSO(backend) = {
 	.mut_stor_close_f = _close,
 	.bitte_get_f = _get,
 	.bitte_put_f = _put,
+	.bitte_rem_f = _rem,
+	.bitte_supersede_f = _ssd,
 };
 
 /* bitte-dsk.c ends here */
