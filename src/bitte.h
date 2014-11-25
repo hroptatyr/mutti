@@ -44,7 +44,7 @@
 #define ECHS_AS_OF_NOW	ECHS_NOW
 #define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
 
-typedef uintptr_t mut_oid_t;
+typedef uint64_t mut_oid_t;
 #define MUT_NUL_OID	((mut_oid_t)0U)
 
 typedef struct {
