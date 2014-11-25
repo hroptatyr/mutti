@@ -482,7 +482,8 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 			_s->curp->hdr.nfacts++;
 		}
 
-		if (UNLIKELY(_s->curp->hdr.nfacts >= 2U * NXPP)) {
+		if (UNLIKELY(_s->curp->hdr.nfacts >= 2U * NXPP) ||
+		    UNLIKELY(_s->curp->hdr.ntrans >= NXPP)) {
 			/* current page needs materialising */
 			rc += _materialise(_s);
 			rc += _extend(_s);
