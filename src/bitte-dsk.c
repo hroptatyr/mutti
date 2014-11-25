@@ -126,6 +126,8 @@ typedef struct _stor_s {
 	struct page_s *restrict curp;
 	/* fact-trans map, laters */
 	struct ftmap_s *ftm;
+	/* valid-trans map, laters */
+	struct vtmap_s *vtm;
 	/* page cache */
 	const struct page_s *cachp[64U];
 	mut_pno_t cachn[64U];
@@ -421,6 +423,116 @@ bang_hdr(struct page_s *restrict tgt, size_t ntrans)
 	memcpy(tgt->hdr.magic, "MUT\002", 4U);
 	tgt->hdr.ver = 1;
 	tgt->hdr.ntrans = ntrans % NXPP;
+	return 0;
+}
+
+
+/* vtmaps on top of red-black trees */
+static inline __attribute__((const, pure)) int
+rb_cmp(echs_instant_t)(echs_instant_t a, echs_instant_t b)
+{
+	a.H++, a.ms++;
+	b.H++, b.ms++;
+	return a.u < b.u ? -1 : (a.u == b.u ? 0 : 1);
+}
+
+#include "rb-instant.c"
+
+typedef struct vtmap_s {
+	size_t zvalids;
+	echs_instant_t trans;
+	mut_oid_t *fof;
+	/* vla! */
+	struct RBTR_S(echs_instant_t) rbt;
+} *vtmap_t;
+
+static int
+clr_vtmap(vtmap_t m)
+{
+	memset(&m->rbt, -1, (m->zvalids + 1U) * sizeof(*m->rbt.base));
+	m->rbt.nfacts = 0U;
+	return 0;
+}
+
+static vtmap_t
+make_vtmap(size_t nnd)
+{
+	vtmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *fof;
+
+	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((fof = malloc(nnd * sizeof(*res->fof))) == NULL)) {
+		free(res);
+		return NULL;
+	}
+	/* go ahead initialising */
+	res->zvalids = nnd;
+	res->fof = fof;
+	clr_vtmap(res);
+	return res;
+}
+
+static void
+free_vtmap(vtmap_t m)
+{
+	if (LIKELY(m->fof != NULL)) {
+		free(m->fof);
+	}
+	free(m);
+	return;
+}
+
+static rbnd_t
+vtmap_make_node(vtmap_t m)
+{
+	rbnd_t res = m->rbt.nfacts++;
+	assert(res < (rbnd_t)NXPP);
+	return res;
+}
+
+static inline mut_oid_t*
+vtmap_get(vtmap_t m, echs_instant_t valid)
+{
+	rbnd_t ro = rb_search(echs_instant_t)(&m->rbt, valid);
+
+	if (UNLIKELY(RBND_NIL_P(ro))) {
+		return NULL;
+	}
+	return m->fof + ro;
+}
+
+static inline mut_oid_t*
+vtmap_put(vtmap_t m, echs_range_t valid)
+{
+	rbnd_t nd = vtmap_make_node(m);
+
+	rb_insert(echs_instant_t)(&m->rbt, nd, valid.from);
+	return m->fof + nd;
+}
+
+static int
+vtmap_put_last(vtmap_t m, echs_range_t valid, mut_oid_t fact, mut_tid_t last)
+{
+	mut_oid_t *f = vtmap_get(m, valid.from);
+
+	if (UNLIKELY(f == NULL)) {
+		/* prep the key */
+		f = vtmap_put(m, valid);
+	}
+	*f = fact;
+	return 0;
+}
+
+static int
+bang_vtmap(struct page_s *restrict tgt, const struct vtmap_s *m)
+{
+	char buf[64];
+
+	FOREACH_RBN_KEY(nd, echs_instant_t, v, &m->rbt) {
+		(size_t)dt_strf(buf, sizeof(buf), v);
+		printf("fact %zu from %s\n", m->fof[nd], buf);
+	}
 	return 0;
 }
 
@@ -746,6 +858,7 @@ _open(const char *fn, int fl)
 	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
 	/* get some more initialisation work done */
 	res->ftm = make_ftmap(NXPP);
+	res->vtm = make_vtmap(NXPP);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
@@ -759,6 +872,7 @@ _materialise(_stor_t _s)
 	int rc = 0;
 
 	rc += bang_ftmap(_s->curp, _s->ftm);
+	rc += bang_vtmap(_s->curp, _s->vtm);
 	/* header fiddling */
 	rc += bang_hdr(_s->curp, _s->ntrans);
 	return rc;
@@ -773,6 +887,8 @@ _close(mut_stor_t s)
 	_materialise(_s);
 	/* finalise the ftmap */
 	free_ftmap(_s->ftm);
+	/* dito for vtmap */
+	free_vtmap(_s->vtm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
 	/* munmap any cached pages */
@@ -834,6 +950,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		_s->curp->valids[it] = valid;
 
 		ftmap_put_last(_s->ftm, fact, it);
+		vtmap_put_last(_s->vtm, valid, fact, it);
 	}
 	if (UNLIKELY(!(_s->ntrans % NXPP))) {
 		/* current page needs materialising */
