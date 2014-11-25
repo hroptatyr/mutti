@@ -392,6 +392,32 @@ _extend(_stor_t _s)
 }
 
 
+static mut_tof_t
+xbsearch_fact(const mut_oid_t *f, size_t z, mut_oid_t fact)
+{
+	size_t lo = 0U;
+	size_t hi = z;
+
+	/* bisection */
+	while (hi - lo > 64U / sizeof(fact)) {
+		size_t mid = (lo + hi) / 2U;
+
+		if (f[mid] > fact) {
+			hi = mid;
+		} else {
+			lo = mid;
+		}
+	}
+	/* scan the cacheline, <=8 mut_oid_t objects */
+	assert(hi - lo <= 64U / sizeof(fact));
+	for (; lo < hi; lo++) {
+		if (f[lo] == fact) {
+			return lo;
+		}
+	}
+	return TOF_NOT_FOUND;
+}
+
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
@@ -407,12 +433,14 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 	/* just quickly go through curp */
 	for (size_t i = 0U, itof = 0U; i < s->curp->hdr.ntrans; i++) {
 		/* look at [itof, etof) */
-		for (const size_t etof = s->curp->tof[i]; itof < etof; itof++) {
-			if (s->curp->facts[itof] == fact) {
-				t = s->curp->trans[i];
-				v = s->curp->valids + i;
-				goto tid_found;
-			}
+		const size_t etof = s->curp->tof[i];
+		mut_tof_t o =
+			xbsearch_fact(s->curp->facts + itof, etof - itof, fact);
+
+		if (!TOF_NOT_FOUND_P(o)) {
+			t = s->curp->trans[i];
+			v = s->curp->valids + o;
+			goto tid_found;
 		}
 	}
 	return ECHS_NUL_BITMP;
