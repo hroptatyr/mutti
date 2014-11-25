@@ -396,13 +396,24 @@ static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 /* retrieve one fact as of the current time stamp */
-	echs_range_t *v = tfmap_get(s->tfm, fact);
+	echs_range_t *v;
 	echs_instant_t t;
 
-	if (v != NULL) {
+	if ((v = tfmap_get(s->tfm, fact)) != NULL) {
 		/* how lucky are we? */
 		t = s->last;
 		goto tid_found;
+	}
+	/* just quickly go through curp */
+	for (size_t i = 0U, itof = 0U; i < s->curp->hdr.ntrans; i++) {
+		/* look at [itof, etof) */
+		for (const size_t etof = s->curp->tof[i]; itof < etof; itof++) {
+			if (s->curp->facts[itof] == fact) {
+				t = s->curp->trans[i];
+				v = s->curp->valids + i;
+				goto tid_found;
+			}
+		}
 	}
 	return ECHS_NUL_BITMP;
 tid_found:
