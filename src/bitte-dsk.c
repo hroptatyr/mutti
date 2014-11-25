@@ -66,6 +66,7 @@
 #define IN_DSO(x)	bitte_dsk_LTX_##x
 #include "bitte-private.h"
 #include "nifty.h"
+#include "rb.h"
 
 /* let's use 64k pages */
 #define PGSZ	(64U * 1024U)
@@ -166,6 +167,8 @@ typedef struct _stor_s {
 	int fd;
 	/* current page */
 	struct page_s *restrict curp;
+	/* current transactions */
+	struct tfmap_s *tfm;
 } *_stor_t;
 
 
@@ -223,6 +226,109 @@ xzfalloc(void *restrict p_old, size_t n_old, size_t n_new, size_t z_memb)
 }
 
 
+/* transaction-fact map */
+static inline __attribute__((const, pure)) int
+rb_cmp(mut_oid_t)(mut_oid_t a, mut_oid_t b)
+{
+	/* never admit equality, this allows us to store multiple values */
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
+#include "rb-fact.c"
+
+typedef struct tfmap_s {
+	size_t zfacts;
+	echs_range_t *v;
+	/* vla */
+	struct RBTR_S(mut_oid_t) rbt;
+} *tfmap_t;
+
+static int
+clr_tfmap(tfmap_t m)
+{
+	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
+	m->rbt.nfacts = 0U;
+	return 0;
+}
+
+static tfmap_t
+make_tfmap(size_t nnd)
+{
+	tfmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *v;
+
+	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((v = malloc(nnd * sizeof(*res->v))) == NULL)) {
+		free(res);
+		return NULL;
+	}
+	/* go initialising */
+	res->zfacts = nnd;
+	res->v = v;
+	clr_tfmap(res);
+	return res;
+}
+
+static __attribute__((nonnull(1))) void
+free_tfmap(tfmap_t m)
+{
+	if (LIKELY(m->v != NULL)) {
+		free(m->v);
+	}
+	free(m);
+	return;
+}
+
+static __attribute__((nonnull(1))) rbnd_t
+tfmap_make_node(tfmap_t m)
+{
+	rbnd_t res = m->rbt.nfacts++;
+	assert(res < (rbnd_t)m->zfacts);
+	return res;
+}
+
+static inline __attribute__((nonnull(1))) echs_range_t*
+tfmap_get(const struct tfmap_s *m, mut_oid_t fact)
+{
+	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
+	return !RBND_NIL_P(nd) ? m->v + nd : NULL;
+}
+
+static inline  __attribute__((nonnull(1))) int
+tfmap_put(tfmap_t m, mut_oid_t fact, echs_range_t valid)
+{
+	echs_range_t *v = tfmap_get(m, fact);
+
+	if (LIKELY(v == NULL)) {
+		rbnd_t nd = tfmap_make_node(m);
+
+		rb_insert(mut_oid_t)(&m->rbt, nd, fact);
+		m->v[nd] = valid;
+		return 0;
+	}
+	/* otherwise update the validity */
+	*v = valid;
+	return 1;
+}
+
+static __attribute__((nonnull(1, 2))) size_t
+bang_tfmap(struct page_s *restrict p, const struct tfmap_s *m, size_t o)
+{
+	size_t i;
+
+	i = o;
+	FOREACH_KEY(mut_oid_t, f, &m->rbt) {
+		p->facts[i++] = f;
+	}
+	i = o;
+	FOREACH_RBN(n, mut_oid_t, &m->rbt) {
+		p->valids[i++] = m->v[n];
+	}
+	return i;
+}
+
+
 /* administrative stuff */
 static int
 bang_hdr(struct page_s *restrict tgt)
@@ -246,7 +352,9 @@ _materialise(_stor_t _s)
 	/* finalise the current tof/trans pair */
 	with (size_t ntrans = _s->curp->hdr.ntrans) {
 		if (LIKELY(ntrans)) {
-			_s->curp->tof[ntrans - 1U] = _s->curp->hdr.nfacts;
+			const size_t of = _s->curp->tof[ntrans - 1U];
+			_s->curp->tof[ntrans - 1U] =
+				bang_tfmap(_s->curp, _s->tfm, of);
 		}
 	}
 	return rc;
@@ -276,6 +384,7 @@ _extend(_stor_t _s)
 		/* otherwise this is the latest shit */
 		_s->curp = curp;
 		_s->fz = nu;
+		clr_tfmap(_s->tfm);
 	}
 	return 0;
 }
@@ -316,19 +425,23 @@ _open(const char *fn, int fl)
 	res->curp = curp;
 	/* quickly guess the number of transactions */
 	res->fz = st.st_size;
+	/* initialise our maps */
+	res->tfm = make_tfmap(2U * NXPP);
 	return (mut_stor_t)res;
 clo:
 	close(fd);
 	return NULL;
 }
 
-static void
+static __attribute__((nonnull(1))) void
 _close(mut_stor_t s)
 {
 	_stor_t _s = (_stor_t)s;
 
 	/* materialise */
 	_materialise(_s);
+	/* cleaning up maps */
+	free_tfmap(_s->tfm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
 	free(_s);
@@ -347,22 +460,27 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 	/* stamp off then */
 	with (echs_instant_t t = echs_now()) {
 		const size_t ntrans = _s->curp->hdr.ntrans;
-		const mut_tof_t it = _s->curp->hdr.nfacts++;
 
 		if (LIKELY(ntrans)) {
 			echs_instant_t last = _s->curp->trans[ntrans - 1U];
 
 			if (!echs_instant_eq_p(t, last)) {
-				_s->curp->tof[ntrans - 1U] = it;
+				const size_t o = _s->curp->tof[ntrans - 1U];
+				size_t nbang = bang_tfmap(_s->curp, _s->tfm, o);
+
+				_s->curp->tof[ntrans - 1U] = nbang;
+				_s->curp->tof[ntrans] = nbang;
 				goto init_trans;
 			}
 		} else {
 		init_trans:
 			_s->curp->trans[_s->curp->hdr.ntrans++] = t;
+			clr_tfmap(_s->tfm);
 		}
 		/* bang */
-		_s->curp->facts[it] = fact;
-		_s->curp->valids[it] = valid;
+		if (tfmap_put(_s->tfm, fact, valid) == 0) {
+			_s->curp->hdr.nfacts++;
+		}
 
 		if (UNLIKELY(_s->curp->hdr.nfacts >= 2U * NXPP)) {
 			/* current page needs materialising */
