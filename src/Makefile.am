@@ -35,7 +35,6 @@ libmutti_la_SOURCES += nifty.h
 libmutti_la_LDFLAGS = $(AM_LDFLAGS)
 libmutti_la_LDFLAGS += -ldb
 libmutti_la_LDFLAGS += -lm
-EXTRA_libmutti_la_SOURCES += wikisort.c
 EXTRA_libmutti_la_SOURCES += rb.c rb.h
 BUILT_SOURCES += rb-fact.c
 BUILT_SOURCES += rb-instant.c
