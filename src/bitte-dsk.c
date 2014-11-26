@@ -393,11 +393,8 @@ _extend(_stor_t _s)
 
 
 static mut_tof_t
-xbsearch_fact(const mut_oid_t *f, size_t z, mut_oid_t fact)
+xbsearch_fact(const mut_oid_t *f, size_t lo, size_t hi, mut_oid_t fact)
 {
-	size_t lo = 0U;
-	size_t hi = z;
-
 	/* bisection */
 	while (hi - lo > 64U / sizeof(fact)) {
 		size_t mid = (lo + hi) / 2U;
@@ -434,8 +431,7 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 	for (size_t i = 0U, itof = 0U; i < s->curp->hdr.ntrans; i++) {
 		/* look at [itof, etof) */
 		const size_t etof = s->curp->tof[i];
-		mut_tof_t o =
-			xbsearch_fact(s->curp->facts + itof, etof - itof, fact);
+		mut_tof_t o = xbsearch_fact(s->curp->facts, itof, etof, fact);
 
 		if (!TOF_NOT_FOUND_P(o)) {
 			t = s->curp->trans[i];
