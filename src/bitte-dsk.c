@@ -171,6 +171,10 @@ typedef struct _stor_s {
 	struct tfmap_s *tfm;
 	/* latest stamp */
 	echs_instant_t last;
+	/* page cache, eventually a MRU cache */
+	const struct page_s *cachp[64U];
+	mut_pno_t cachn[64U];
+	size_t ncach;
 } *_stor_t;
 
 
@@ -391,8 +395,55 @@ _extend(_stor_t _s)
 	return 0;
 }
 
+static inline __attribute__((nonnull(1), pure)) size_t
+_stor_cached_p(struct _stor_s *restrict s, mut_pno_t p)
+{
+	for (size_t i = countof(s->cachn) - s->ncach;
+	     i < countof(s->cachn); i++) {
+		if (s->cachn[i] == p) {
+			return i;
+		}
+	}
+	return PNO_NOT_CACHED;
+}
+
+static const struct page_s*
+_stor_load_page(struct _stor_s *restrict s, mut_pno_t p)
+{
+	size_t pi;
+
+	if (PNO_NOT_CACHED_P((pi = _stor_cached_p(s, p)))) {
+		const size_t of = p * PGSZ;
+		void *pp = mmap(NULL, PGSZ, PROT_READ, MAP_SHARED, s->fd, of);
+		if (UNLIKELY(pp == MAP_FAILED)) {
+			return NULL;
+		} else if (UNLIKELY(s->ncach >= countof(s->cachp))) {
+			/* grml, have to evict the least recently used page */
+			munmap(deconst(s->cachp[countof(s->cachp) - 1U]), PGSZ);
+			/* move everything 1 item up */
+			memmove(s->cachp + 1U, s->cachp,
+				(countof(s->cachp) - 1U) * sizeof(*s->cachp));
+			memmove(s->cachn + 1U, s->cachn,
+				(countof(s->cachn) - 1U) * sizeof(*s->cachn));
+			pi = 0U;
+		} else {
+			pi = countof(s->cachp) - ++s->ncach;
+		}
+		/* cache page P */
+		s->cachn[pi] = p;
+		s->cachp[pi] = pp;
+	}
+	return s->cachp[pi];
+}
+
 
-static mut_tof_t
+/* page-wise stuff */
+struct mut_tof_s {
+	mut_tof_t t;
+	mut_tof_t of;
+};
+
+static __attribute__((nonnull(1), pure)) mut_tof_t
 xbsearch_fact(const mut_oid_t *f, size_t lo, size_t hi, mut_oid_t fact)
 {
 	/* bisection */
@@ -415,6 +466,22 @@ xbsearch_fact(const mut_oid_t *f, size_t lo, size_t hi, mut_oid_t fact)
 	return TOF_NOT_FOUND;
 }
 
+static __attribute__((nonnull(1), pure)) struct mut_tof_s
+page_get_tof(const struct page_s *p, mut_oid_t fact)
+{
+	for (size_t i = 0U, itof = 0U; i < p->hdr.ntrans; i++) {
+		/* look at [itof, etof) */
+		const size_t etof = p->tof[i];
+		mut_tof_t o = xbsearch_fact(p->facts, itof, etof, fact);
+
+		if (!TOF_NOT_FOUND_P(o)) {
+			return (struct mut_tof_s){i, o};
+		}
+	}
+	return (struct mut_tof_s){TOF_NOT_FOUND, TOF_NOT_FOUND};
+}
+
+
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
@@ -428,17 +495,24 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 		goto tid_found;
 	}
 	/* just quickly go through curp */
-	for (size_t i = 0U, itof = 0U; i < s->curp->hdr.ntrans; i++) {
-		/* look at [itof, etof) */
-		const size_t etof = s->curp->tof[i];
-		mut_tof_t o = xbsearch_fact(s->curp->facts, itof, etof, fact);
-
-		if (!TOF_NOT_FOUND_P(o)) {
-			t = s->curp->trans[i];
-			v = s->curp->valids + o;
+	with (struct mut_tof_s curtof = page_get_tof(s->curp, fact)) {
+		if (!TOF_NOT_FOUND_P(curtof.of)) {
+			t = s->curp->trans[curtof.t];
+			v = s->curp->valids + curtof.of;
 			goto tid_found;
 		}
 	}
+	/* disastrous fail, try previous pages */
+	for (mut_pno_t pi = s->fz / PGSZ; pi-- > 0U;) {
+		const struct page_s *p = _stor_load_page(s, pi);
+		struct mut_tof_s cchtof = page_get_tof(p, fact);
+
+		if (!TOF_NOT_FOUND_P(cchtof.of)) {
+			t = p->trans[cchtof.t];
+			v = p->valids + cchtof.of;
+		}
+	}
+	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
 tid_found:
 	return (echs_bitmp_t){*v, ECHS_RANGE_FROM(t)};
