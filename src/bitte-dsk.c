@@ -158,6 +158,22 @@ struct page_s {
 	};
 };
 
+/* convenience struct similar to echs_bitmp_t */
+typedef struct {
+	echs_instant_t t;
+	echs_range_t v;
+} sesquitmp_t;
+#define SESQUITMP_NOT_FOUND		((sesquitmp_t){ECHS_NUL_INSTANT})
+#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).t))
+
+/* fact cache is essentially a fixed size hash-table
+ * where we don't care about collisions or resizing */
+typedef struct fcache_s {
+#define FCACHE_SIZE	(16384U)
+	mut_oid_t f[FCACHE_SIZE];
+	sesquitmp_t tv[FCACHE_SIZE];
+} *fcache_t;
+
 /* we promised to define the mut_stor_s struct */
 typedef struct _stor_s {
 	struct mut_stor_s super;
@@ -175,6 +191,8 @@ typedef struct _stor_s {
 	const struct page_s *cachp[64U];
 	mut_pno_t cachn[64U];
 	size_t ncach;
+	/* fact cache */
+	struct fcache_s fc[1U];
 } *_stor_t;
 
 
@@ -335,6 +353,29 @@ bang_tfmap(struct page_s *restrict p, const struct tfmap_s *m, size_t o)
 }
 
 
+/* fact cache */
+static int
+fcache_put(fcache_t restrict fc, mut_oid_t f, sesquitmp_t tv)
+{
+	const size_t fo = f % FCACHE_SIZE;
+
+	fc->f[fo] = f;
+	fc->tv[fo] = tv;
+	return 0;
+}
+
+static sesquitmp_t
+fcache_get(const struct fcache_s *fc, mut_oid_t f)
+{
+	const size_t fo = f % FCACHE_SIZE;
+
+	if (fc->f[fo] == f) {
+		return fc->tv[fo];
+	}
+	return SESQUITMP_NOT_FOUND;
+}
+
+
 /* administrative stuff */
 static int
 bang_hdr(struct page_s *restrict tgt)
@@ -486,20 +527,27 @@ static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 /* retrieve one fact as of the current time stamp */
-	echs_range_t *v;
-	echs_instant_t t;
+	sesquitmp_t tv;
 
-	if ((v = tfmap_get(s->tfm, fact)) != NULL) {
-		/* how lucky are we? */
-		t = s->last;
+	/* is it in our big fact-cache? */
+	if (!SESQUITMP_NOT_FOUND_P((tv = fcache_get(s->fc, fact)))) {
 		goto tid_found;
+	}
+	/* is it very very recent then? */
+	if_with (echs_range_t *v = tfmap_get(s->tfm, fact), v != NULL) {
+		/* how lucky are we? */
+		tv.t = s->last;
+		tv.v = *v;
+		goto tid_found_cch;
 	}
 	/* just quickly go through curp */
 	with (struct mut_tof_s curtof = page_get_tof(s->curp, fact)) {
 		if (!TOF_NOT_FOUND_P(curtof.of)) {
-			t = s->curp->trans[curtof.t];
-			v = s->curp->valids + curtof.of;
-			goto tid_found;
+			tv = (sesquitmp_t){
+				s->curp->trans[curtof.t],
+				s->curp->valids[curtof.of],
+			};
+			goto tid_found_cch;
 		}
 	}
 	/* disastrous fail, try previous pages */
@@ -508,14 +556,20 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 		struct mut_tof_s cchtof = page_get_tof(p, fact);
 
 		if (!TOF_NOT_FOUND_P(cchtof.of)) {
-			t = p->trans[cchtof.t];
-			v = p->valids + cchtof.of;
+			tv = (sesquitmp_t){
+				p->trans[cchtof.t],
+				p->valids[cchtof.of],
+			};
+			goto tid_found_cch;
 		}
 	}
 	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
+tid_found_cch:
+	/* quickly cache what we've got */
+	fcache_put(s->fc, fact, tv);
 tid_found:
-	return (echs_bitmp_t){*v, ECHS_RANGE_FROM(t)};
+	return (echs_bitmp_t){tv.v, ECHS_RANGE_FROM(tv.t)};
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
@@ -613,6 +667,8 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		if (tfmap_put(_s->tfm, fact, valid) == 0) {
 			_s->curp->hdr.nfacts++;
 		}
+		/* and cache this one */
+		fcache_put(_s->fc, fact, (sesquitmp_t){t, valid});
 
 		if (UNLIKELY(_s->curp->hdr.nfacts >= 2U * NXPP) ||
 		    UNLIKELY(_s->curp->hdr.ntrans >= NXPP)) {
