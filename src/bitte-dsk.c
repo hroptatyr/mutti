@@ -426,6 +426,8 @@ static int
 _extend(_stor_t _s)
 {
 /* munmap current page, extend the file and map a new current page */
+	int rc = _materialise(_s);
+
 	munmap(_s->curp, PGSZ);
 	_s->curp = NULL;
 	_s->last = ECHS_NUL_INSTANT;
@@ -449,7 +451,7 @@ _extend(_stor_t _s)
 		_s->fz = nu;
 		clr_tfmap(_s->tfm);
 	}
-	return 0;
+	return rc;
 }
 
 static inline __attribute__((nonnull(1), pure)) size_t
@@ -725,8 +727,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		if (UNLIKELY(_s->curp->hdr.nfacts >= 2U * NXPP) ||
 		    UNLIKELY(_s->curp->hdr.ntrans >= NXPP)) {
 			/* current page needs materialising */
-			rc += _materialise(_s);
-			rc += _extend(_s);
+			rc = _extend(_s);
 		}
 	}
 	return rc;
