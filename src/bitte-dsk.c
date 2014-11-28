@@ -107,6 +107,14 @@ typedef uint32_t mut_vof_t;
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
+/* convenience struct similar to echs_bitmp_t */
+typedef struct {
+	echs_instant_t t;
+	echs_range_t v;
+} sesquitmp_t;
+#define SESQUITMP_NOT_FOUND		((sesquitmp_t){ECHS_NUL_INSTANT})
+#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).t))
+
 /* we have to be 4k long */
 struct pphdr_s {
 	/* magic identifier, will be MUTB for bitemporal */
@@ -159,43 +167,40 @@ struct pphdr_s {
 };
 
 /* this is one page in our file */
-struct page_s {
+struct tpage_s {
 	struct pphdr_s hdr;
-	union {
-		mut_tof_t tof[NXPP];
-		mut_vof_t vof[NXPP];
-	};
-	union {
-		echs_instant_t trans[NXPP];
-		echs_instant_t vfrom[NXPP];
-	};
-	union {
-		struct {
-			mut_oid_t facts[2U * NXPP];
-			echs_range_t valids[2U * NXPP];
-		};
-		struct {
-			mut_oid_t vfact[3U * NXPP];
-			echs_instant_t vtill[3U * NXPP];
-		};
-	};
+	mut_tof_t tof[NXPP];
+	echs_instant_t trans[NXPP];
+	mut_oid_t facts[2U * NXPP];
+	echs_range_t valids[2U * NXPP];
 };
 
-/* convenience struct similar to echs_bitmp_t */
-typedef struct {
-	echs_instant_t t;
-	echs_range_t v;
-} sesquitmp_t;
-#define SESQUITMP_NOT_FOUND		((sesquitmp_t){ECHS_NUL_INSTANT})
-#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).t))
+struct vpage_s {
+	struct pphdr_s hdr;
+	mut_vof_t vof[NXPP];
+	echs_instant_t vfrom[NXPP];
+	mut_oid_t vfact[3U * NXPP];
+	echs_instant_t vtill[3U * NXPP];
+};
 
-/* fact cache is essentially a fixed size hash-table
- * where we don't care about collisions or resizing */
-typedef struct fcache_s {
-#define FCACHE_SIZE	(16384U)
-	mut_oid_t f[FCACHE_SIZE];
-	sesquitmp_t tv[FCACHE_SIZE];
-} *fcache_t;
+typedef struct {
+	sesquitmp_t tv[2U];
+} sesquitmp2_t;
+
+struct fpage_s {
+	struct pphdr_s hdr;
+	mut_tof_t tof[NXPP];
+	mut_oid_t facts[NXPP];
+	sesquitmp2_t tvalids[NXPP];
+};
+
+union page_u {
+	struct tpage_s t[1U];
+	struct vpage_s v[1U];
+	struct fpage_s f[1U];
+} __attribute__((transparent_union));
+
+typedef const union page_u *page_t;
 
 /* we promised to define the mut_stor_s struct */
 typedef struct _stor_s {
@@ -205,17 +210,18 @@ typedef struct _stor_s {
 	/* handle */
 	int fd;
 	/* current page(s) */
-	struct page_s *restrict curp;
+	union page_u *curp;
 	/* current transactions */
-	struct tfmap_s *tfm;
+	union {
+		struct tfmap_s *tfm;
+		struct fsmap_s *fsm;
+	};
 	/* latest stamp */
 	echs_instant_t last;
 	/* page cache, eventually a MRU cache */
-	const struct page_s *cachp[64U];
+	page_t cachp[64U];
 	mut_pno_t cachn[64U];
 	size_t ncach;
-	/* fact cache */
-	struct fcache_s fc[1U];
 } *_stor_t;
 
 
@@ -360,7 +366,7 @@ tfmap_put(tfmap_t m, mut_oid_t fact, echs_range_t valid)
 }
 
 static __attribute__((nonnull(1, 2))) size_t
-bang_tfmap(struct page_s *restrict p, const struct tfmap_s *m, size_t o)
+bang_tfmap(struct tpage_s *restrict p, const struct tfmap_s *m, size_t o)
 {
 	size_t i;
 
@@ -401,7 +407,7 @@ fcache_get(const struct fcache_s *fc, mut_oid_t f)
 
 /* administrative stuff */
 static int
-bang_hdr(struct page_s *restrict tgt)
+bang_thdr(struct tpage_s *restrict tgt)
 {
 	memcpy(tgt->hdr.magic, "MUTB", 4U);
 	tgt->hdr.ver = 1U;
@@ -417,14 +423,14 @@ _materialise(_stor_t _s)
 	int rc = 0;
 
 	/* header fiddling */
-	rc += bang_hdr(_s->curp);
+	rc += bang_thdr(_s->curp->t);
 
 	/* finalise the current tof/trans pair */
-	with (size_t ntrans = _s->curp->hdr.ntrans) {
+	with (size_t ntrans = _s->curp->t->hdr.ntrans) {
 		if (LIKELY(ntrans)) {
-			const size_t of = _s->curp->tof[ntrans - 1U];
-			_s->curp->tof[ntrans - 1U] =
-				bang_tfmap(_s->curp, _s->tfm, of);
+			const size_t of = _s->curp->t->tof[ntrans - 1U];
+			_s->curp->t->tof[ntrans - 1U] =
+				bang_tfmap(_s->curp->t, _s->tfm, of);
 		}
 	}
 	return rc;
@@ -474,7 +480,7 @@ _stor_cached_p(struct _stor_s *restrict s, mut_pno_t p)
 	return PNO_NOT_CACHED;
 }
 
-static const struct page_s*
+static page_t
 _stor_load_page(struct _stor_s *restrict s, mut_pno_t p)
 {
 	size_t pi;
@@ -534,7 +540,7 @@ xbsearch_fact(const mut_oid_t *f, size_t lo, size_t hi, mut_oid_t fact)
 }
 
 static __attribute__((nonnull(1), pure)) struct mut_tof_s
-page_get_tof(const struct page_s *p, mut_oid_t fact)
+tpage_get_tof(const struct tpage_s *p, mut_oid_t fact)
 {
 	for (size_t i = 0U, itof = 0U; i < p->hdr.ntrans; i++) {
 		/* look at [itof, etof) */
@@ -608,7 +614,7 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	/* build the vfmap */
 	if (!PNO_NOT_CACHED_P(p)) {
 		for (; p < s->fz / PGSZ; p++) {
-			const struct page_s *cp = _stor_load_page(s, p);
+			page_t cp = _stor_load_page(s, p);
 
 			if (cp->hdr.pty != PTY_CHKPT) {
 				break;
