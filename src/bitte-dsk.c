@@ -428,6 +428,7 @@ _extend(_stor_t _s)
 /* munmap current page, extend the file and map a new current page */
 	munmap(_s->curp, PGSZ);
 	_s->curp = NULL;
+	_s->last = ECHS_NUL_INSTANT;
 
 	/* calc new size */
 	with (const off_t ol = _s->fz, nu = ol + PGSZ) {
