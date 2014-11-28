@@ -51,7 +51,14 @@
  *   +-------+---------+---------+---------+---------+
  *   |  HDR  | 1024VOF | 1024Vfr |  3072F  | 3072Vti |
  *   +-------+---------+---------+---------+---------+
- */
+ *
+ * Moreover this file defines an index (optionally disk-based) for
+ * fact -> bitmp mapping to record the history of a single fact.
+ *   0       4k         8k       16k                 64k
+ *   +-------+---------+---------+-------------------+
+ *   |  HDR  | 1024FLen|  1024F  |  1024 x 2 SESQUI  |
+ *   +-------+---------+---------+-------------------+
+ **/
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
@@ -111,6 +118,7 @@ struct pphdr_s {
 #define PTY_UNK		((uint16_t)0U)
 #define PTY_TRANS	((uint16_t)1U)
 #define PTY_CHKPT	((uint16_t)2U)
+#define PTY_FHIST	((uint16_t)4U)
 	/* nxpp scale, implies size of page and offsets */
 	uint32_t nxpp;
 	uint32_t:32;
@@ -196,7 +204,7 @@ typedef struct _stor_s {
 	off_t fz;
 	/* handle */
 	int fd;
-	/* current page */
+	/* current page(s) */
 	struct page_s *restrict curp;
 	/* current transactions */
 	struct tfmap_s *tfm;
@@ -637,7 +645,7 @@ bang:
 static mut_stor_t
 _open(const char *fn, int fl)
 {
-	struct _stor_s *res;
+	struct _stor_s *res = NULL;
 	void *curp = NULL;
 	struct stat st;
 	int fd;
@@ -664,17 +672,52 @@ _open(const char *fn, int fl)
 		goto clo;
 	}
 	/* mem store they want, good */
-	res = calloc(1, sizeof(struct _stor_s));
+	if ((res = calloc(2, sizeof(struct _stor_s))) == NULL) {
+		goto mun;
+	}
 	res->fd = fd;
 	res->curp = curp;
 	/* quickly guess the number of transactions */
 	res->fz = st.st_size;
 	/* initialise our maps */
 	res->tfm = make_tfmap(2U * NXPP);
+
+	/* initialise the second guy, fact -> tv sesquis */
+	if (0) {
+		;
+	} else if (UNLIKELY((fd = open(".facts", fl, 0666)) < 0)) {
+		goto out;
+	} else if (!(fl & O_RDWR)) {
+		/* aaah, read-only, aye aye */
+		;
+	} else if ((fl & O_TRUNC) && UNLIKELY(ftruncate(fd, PGSZ) < 0)) {
+		goto clo;
+	} else if (UNLIKELY(fstat(fd, &st) < 0)) {
+		goto clo;
+	} else if (UNLIKELY(!st.st_size)) {
+		goto clo;
+	} else if ((
+		{
+			/* load last page to scribble in */
+			const off_t of = (st.st_size - 1U) & ~(PGSZ - 1U);
+			curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, fd, of);
+		}) == MAP_FAILED) {
+		goto mun;
+	}
+	/* assignments for fact->tv map */
+	res[1U].fd = fd;
+	res[1U].curp = curp;
+	/* quickly guess the number of transactions */
+	res[1U].fz = st.st_size;
+	/* yay */
 	return (mut_stor_t)res;
+
+mun:
+	munmap(curp, PGSZ);
 clo:
 	close(fd);
-	return NULL;
+out:
+	return (mut_stor_t)res;
 }
 
 static __attribute__((nonnull(1))) void
@@ -688,6 +731,13 @@ _close(mut_stor_t s)
 	free_tfmap(_s->tfm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
+	/* close descriptor */
+	close(_s->fd);
+	/* fact->tv mapping */
+	if (_s[1U].fd >= 0) {
+		munmap(_s[1U].curp, PGSZ);
+		close(_s[1U].fd);
+	}
 	free(_s);
 	return;
 }
