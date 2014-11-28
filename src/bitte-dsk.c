@@ -108,19 +108,34 @@ struct pphdr_s {
 	uint16_t ver;
 	/* page type */
 	uint16_t pty:16;
+#define PTY_UNK		((uint16_t)0U)
+#define PTY_TRANS	((uint16_t)1U)
+#define PTY_CHKPT	((uint16_t)2U)
 	/* nxpp scale, implies size of page and offsets */
 	uint32_t nxpp;
 	uint32_t:32;
 	/* 16B */
 
-	uint32_t ntrans;
+	union {
+		/* for trans pages */
+		uint32_t ntrans;
+		/* for checkpoint pages */
+		uint32_t nvalids;
+	};
 	uint32_t nfacts;
 	uint32_t:32;
 	uint32_t:32;
 	/* 32B */
 
-	uint32_t:32;
-	uint32_t:32;
+	union {
+		/* for trans pages */
+		struct {
+			uint32_t:32;
+			uint32_t:32;
+		};
+		/* for checkpoint pages */
+		echs_instant_t tfrom;
+	};
 	uint32_t:32;
 	uint32_t:32;
 	/* 48B */
@@ -382,7 +397,7 @@ bang_hdr(struct page_s *restrict tgt)
 {
 	memcpy(tgt->hdr.magic, "MUTB", 4U);
 	tgt->hdr.ver = 1U;
-	tgt->hdr.pty = 1U;
+	tgt->hdr.pty = PTY_TRANS;
 	tgt->hdr.nxpp = NXPP;
 	return 0;
 }
@@ -576,6 +591,42 @@ static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 /* retrieve one fact as of the time stamp specified */
+	/* find the most recent checkpoint before/on AS_OF */
+	mut_pno_t p = PNO_NOT_CACHED;
+
+	/* build the vfmap */
+	if (!PNO_NOT_CACHED_P(p)) {
+		for (; p < s->fz / PGSZ; p++) {
+			const struct page_s *cp = _stor_load_page(s, p);
+
+			if (cp->hdr.pty != PTY_CHKPT) {
+				break;
+			}
+			/* otherwise add more stuff to the vfmap */
+			;
+		}
+	}
+
+	/* now look for trans pages */
+	for (; p < s->fz / PGSZ; p++) {
+		const struct page_s *tp = _stor_load_page(s, p);
+
+		if (tp->hdr.pty != PTY_TRANS) {
+			break;
+		} else if (!tp->hdr.ntrans) {
+			break;
+		}
+		/* otherwise go through the transactions */
+		for (mut_tof_t i = 0U; i < tp->hdr.ntrans; i++) {
+			if (!echs_instant_lt_p(tp->trans[i], as_of)) {
+				/* big break, we're too far */
+				goto bang;
+			}
+			/* bang onto vfmap */
+			;
+		}
+	}
+bang:
 	return ECHS_NUL_BITMP;
 }
 
