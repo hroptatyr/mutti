@@ -591,7 +591,9 @@ _materialise2(_stor_t _s)
 	rc += bang_fhdr(_s[1U].curp->f);
 
 	/* finalise the current tof/trans pair */
-	bang_fsmap(_s[1U].curp->f, _s[1U].fsm);
+	with (size_t nfacts = bang_fsmap(_s[1U].curp->f, _s[1U].fsm)) {
+		_s[1U].curp->f->hdr.nfacts = nfacts;
+	}
 	return 0;
 }
 
