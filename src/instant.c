@@ -371,23 +371,4 @@ echs_set_now(echs_instant_t i)
 	return;
 }
 
-
-/* sorting */
-#define T	echs_instant_t
-
-static inline __attribute__((const, pure)) bool
-compare(T i1, T i2)
-{
-	return echs_instant_lt_p(i1, i2);
-}
-
-#include "wikisort.c"
-
-void
-echs_instant_sort(echs_instant_t *restrict in, size_t nin)
-{
-	WikiSort(in, nin);
-	return;
-}
-
 /* instant.c ends here */

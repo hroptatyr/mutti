@@ -36,14 +36,29 @@
  ***/
 /***
  * The disk format:
- * - pages are 64k (that's 16 4k pages)
- * +-------+-------+---------------+
- * | 1024T | 1024F |     1024V     |
- * +-------+-------+-------+-------+
- * | <=1024F+1024_ | <=1024O+1024O |
- * +---------------+---------------+
- * The bottom layer is a red-black-table really, with at most 1024 facts and
- * their first and last transaction within THAT page. */
+ * - Pages are 64k (that's 16 4k pages)
+ * - There are 2 page types, transaction pages and checkpoint pages
+ *
+ * - Transaction pages look like:
+ *   0       4k        8k        16k       32k       64k
+ *   +-------+---------+---------+---------+---------+
+ *   |  HDR  | 1024TOF |  1024T  |  2048F  |  2048V  |
+ *   +-------+---------+---------+---------+---------+
+ *   - Facts per transaction are sorted.
+ *
+ * - Checkpoint pages look like:
+ *   0       4k        8k        16k       40k       64k
+ *   +-------+---------+---------+---------+---------+
+ *   |  HDR  | 1024VOF | 1024Vfr |  3072F  | 3072Vti |
+ *   +-------+---------+---------+---------+---------+
+ *
+ * Moreover this file defines an index (optionally disk-based) for
+ * fact -> bitmp mapping to record the history of a single fact.
+ *   0       4k         8k       16k                 64k
+ *   +-------+---------+---------+-------------------+
+ *   |  HDR  | 1024FLen|  1024F  |  1024 x 2 SESQUI  |
+ *   +-------+---------+---------+-------------------+
+ **/
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
@@ -58,6 +73,7 @@
 #define IN_DSO(x)	bitte_dsk_LTX_##x
 #include "bitte-private.h"
 #include "nifty.h"
+#include "rb.h"
 
 /* let's use 64k pages */
 #define PGSZ	(64U * 1024U)
@@ -72,52 +88,141 @@
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
-/* a transaction id is simply an offset in the STOR SoA */
-typedef uintptr_t mut_tid_t;
-/* page number */
-typedef uintptr_t mut_pno_t;
+/* global enumerator for transactions */
+typedef uint64_t mut_tid_t;
+/* global page number enumerator */
+typedef uint64_t mut_pno_t;
+/* counter type for numbers of facts per trans */
+typedef uint32_t mut_tof_t;
+typedef uint32_t mut_vof_t;
+typedef uint32_t mut_fof_t;
 
-#define TID_NOT_FOUND		((mut_tid_t)-1)
-#define TID_NOT_FOUND_P(x)	(!~(mut_tid_t)(x))
+#define TOF_NOT_FOUND		((mut_tof_t)-1)
+#define TOF_NOT_FOUND_P(x)	(!~(mut_tof_t)(x))
+
+#define VOF_NOT_FOUND		((mut_vof_t)-1)
+#define VOF_NOT_FOUND_P(x)	(!~(mut_vof_t)(x))
+
+#define FOF_NOT_FOUND		((mut_fof_t)-1)
+#define FOF_NOT_FOUND_P(x)	(!~(mut_fof_t)(x))
 
 #define PNO_NOT_CACHED		((size_t)-1)
 #define PNO_NOT_CACHED_P(x)	(!~(size_t)(x))
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
-/* fact offsets */
+/* convenience struct similar to echs_bitmp_t */
 typedef struct {
-	mut_tid_t _1st;
-	mut_tid_t last;
-} mut_fof_t;
+	echs_instant_t t;
+	echs_range_t v;
+} sesquitmp_t;
+#define SESQUITMP_NOT_FOUND		((sesquitmp_t){ECHS_NUL_INSTANT})
+#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).t))
 
-/* we have to be NXPP * sizeof(echs_instant_t) long */
+/* we have to be 4k long */
 struct pphdr_s {
-	mut_oid_t space[NXPP];
+	/* magic identifier, will be MUTB for bitemporal */
+	char magic[4U];
+	/* version number, also endian indicator */
+	uint16_t ver;
+	/* page type */
+	uint16_t pty:16;
+#define PTY_UNK		((uint16_t)0U)
+#define PTY_TRANS	((uint16_t)1U)
+#define PTY_CHKPT	((uint16_t)2U)
+#define PTY_FHIST	((uint16_t)4U)
+	/* nxpp scale, implies size of page and offsets */
+	uint32_t nxpp;
+	uint32_t:32;
+	/* 16B */
+
+	union {
+		/* for trans pages */
+		uint32_t ntrans;
+		/* for checkpoint pages */
+		uint32_t nvalids;
+		/* for fact pages */
+		uint32_t ntvalids;
+	};
+	uint32_t nfacts;
+	uint32_t:32;
+	uint32_t:32;
+	/* 32B */
+
+	union {
+		/* for trans pages */
+		struct {
+			uint32_t:32;
+			uint32_t:32;
+		};
+		/* for checkpoint pages */
+		echs_instant_t tfrom;
+	};
+	uint32_t:32;
+	uint32_t:32;
+	/* 48B */
+
+	uint32_t:32;
+	uint32_t:32;
+	uint32_t:32;
+	uint32_t:32;
+	/* 64B */
+
+	mut_oid_t space[512U - 8U];
+	/* 4096B */
 };
 
 /* this is one page in our file */
-struct page_s {
+struct tpage_s {
 	struct pphdr_s hdr;
+	mut_tof_t tof[NXPP];
 	echs_instant_t trans[NXPP];
-	echs_range_t valids[NXPP];
-	mut_oid_t facts[NXPP];
-	mut_oid_t ftm[NXPP];
-	mut_fof_t fof[NXPP];
+	mut_oid_t facts[2U * NXPP];
+	echs_range_t valids[2U * NXPP];
 };
+
+struct vpage_s {
+	struct pphdr_s hdr;
+	mut_vof_t vof[NXPP];
+	echs_instant_t vfrom[NXPP];
+	mut_oid_t vfact[3U * NXPP];
+	echs_instant_t vtill[3U * NXPP];
+};
+
+struct fpage_s {
+	struct pphdr_s hdr;
+	/* offsets into tvalids, fact I's range is [fof[i - 1], fof[i]) */
+	mut_fof_t fof[NXPP];
+	mut_oid_t facts[NXPP];
+	sesquitmp_t tvalids[2U * NXPP];
+};
+
+union page_u {
+	struct tpage_s t[1U];
+	struct vpage_s v[1U];
+	struct fpage_s f[1U];
+} __attribute__((transparent_union));
+
+typedef const union page_u *page_t;
 
 /* we promised to define the mut_stor_s struct */
 typedef struct _stor_s {
 	struct mut_stor_s super;
-	size_t ntrans;
+	/* file size */
+	off_t fz;
 	/* handle */
 	int fd;
-	/* current page */
-	struct page_s *restrict curp;
-	/* fact-trans map, laters */
-	struct ftmap_s *ftm;
-	/* page cache */
-	const struct page_s *cachp[64U];
+	/* current page(s) */
+	union page_u *curp;
+	/* current transactions */
+	union {
+		struct tfmap_s *tfm;
+		struct fsmap_s *fsm;
+	};
+	/* latest stamp */
+	echs_instant_t last;
+	/* page cache, eventually a MRU cache */
+	page_t cachp[64U];
 	mut_pno_t cachn[64U];
 	size_t ncach;
 } *_stor_t;
@@ -176,22 +281,384 @@ xzfalloc(void *restrict p_old, size_t n_old, size_t n_new, size_t z_memb)
 	return xfalloc(p_old, n_old * z_memb, n_new * z_memb);
 }
 
-#define min(T, x, y)		min_##T(x, y)
-#define DEFMIN(T)				\
-static inline __attribute__((pure, const)) T	\
-min_##T(T x, T y)				\
-{						\
-	return x <= y ? x : y;			\
-}						\
-struct __##T##_defined_s
+
+/* transaction-fact map */
+static inline __attribute__((const, pure)) int
+rb_cmp(mut_oid_t)(mut_oid_t a, mut_oid_t b)
+{
+	/* never admit equality, this allows us to store multiple values */
+	return a < b ? -1 : a > b ? 1 : 0;
+}
 
-DEFMIN(size_t);
+#include "rb-fact.c"
+
+typedef struct tfmap_s {
+	size_t zfacts;
+	echs_range_t *v;
+	/* vla */
+	struct RBTR_S(mut_oid_t) rbt;
+} *tfmap_t;
+
+static int
+clr_tfmap(tfmap_t m)
+{
+	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
+	m->rbt.nfacts = 0U;
+	return 0;
+}
+
+static tfmap_t
+make_tfmap(size_t nnd)
+{
+	tfmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *v;
+
+	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((v = malloc(nnd * sizeof(*res->v))) == NULL)) {
+		free(res);
+		return NULL;
+	}
+	/* go initialising */
+	res->zfacts = nnd;
+	res->v = v;
+	clr_tfmap(res);
+	return res;
+}
+
+static __attribute__((nonnull(1))) void
+free_tfmap(tfmap_t m)
+{
+	if (LIKELY(m->v != NULL)) {
+		free(m->v);
+	}
+	free(m);
+	return;
+}
+
+static __attribute__((nonnull(1))) rbnd_t
+tfmap_make_node(tfmap_t m)
+{
+	rbnd_t res = m->rbt.nfacts++;
+	assert(res < (rbnd_t)m->zfacts);
+	return res;
+}
+
+static inline __attribute__((nonnull(1))) echs_range_t*
+tfmap_get(const struct tfmap_s *m, mut_oid_t fact)
+{
+	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
+	return !RBND_NIL_P(nd) ? m->v + nd : NULL;
+}
+
+static inline  __attribute__((nonnull(1))) int
+tfmap_put(tfmap_t m, mut_oid_t fact, echs_range_t valid)
+{
+	echs_range_t *v = tfmap_get(m, fact);
+
+	if (LIKELY(v == NULL)) {
+		rbnd_t nd = tfmap_make_node(m);
+
+		rb_insert(mut_oid_t)(&m->rbt, nd, fact);
+		m->v[nd] = valid;
+		return 0;
+	}
+	/* otherwise update the validity */
+	*v = valid;
+	return 1;
+}
+
+static __attribute__((nonnull(1, 2))) size_t
+bang_tfmap(struct tpage_s *restrict p, const struct tfmap_s *m, size_t o)
+{
+	size_t i;
+
+	i = o;
+	FOREACH_KEY(mut_oid_t, f, &m->rbt) {
+		p->facts[i++] = f;
+	}
+	i = o;
+	FOREACH_RBN(n, mut_oid_t, &m->rbt) {
+		p->valids[i++] = m->v[n];
+	}
+	return i;
+}
 
 
-static inline __attribute__((nonnull(1), pure)) size_t
-_stor_ntrans(const struct _stor_s *s)
+/* fact sesqui map */
+struct sesqll_s {
+	mut_fof_t next;
+	mut_fof_t last;
+	sesquitmp_t tv;
+};
+
+typedef struct fsmap_s {
+	size_t zfacts;
+	size_t nsesqs;
+	mut_fof_t *of;
+	struct sesqll_s *tv;
+	/* vla */
+	struct RBTR_S(mut_oid_t) rbt;
+} *fsmap_t;
+
+static int
+clr_fsmap(fsmap_t m)
 {
-	return s->ntrans;
+	m->nsesqs = 0U;
+	memset(m->of, -1, (m->zfacts) * sizeof(*m->of));
+	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
+	m->rbt.nfacts = 0U;
+	return 0;
+}
+
+static fsmap_t
+make_fsmap(size_t nnd)
+{
+	fsmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
+	void *of;
+	void *tv;
+
+	if (UNLIKELY(res == NULL)) {
+		return NULL;
+	} else if (UNLIKELY((of = malloc(nnd * sizeof(*res->of))) == NULL)) {
+		free(res);
+		return NULL;
+	} else if (UNLIKELY((tv = malloc(
+				     2U * nnd * sizeof(*res->tv))) == NULL)) {
+		free(res);
+		free(of);
+		return NULL;
+	}
+	/* go initialising */
+	res->zfacts = nnd;
+	res->of = of;
+	res->tv = tv;
+	clr_fsmap(res);
+	return res;
+}
+
+static __attribute__((nonnull(1))) void
+free_fsmap(fsmap_t m)
+{
+	if (LIKELY(m->of != NULL)) {
+		free(m->of);
+	}
+	if (LIKELY(m->tv != NULL)) {
+		free(m->tv);
+	}
+	free(m);
+	return;
+}
+
+static __attribute__((nonnull(1))) rbnd_t
+fsmap_make_node(fsmap_t m)
+{
+	rbnd_t res = m->rbt.nfacts++;
+	assert(res < (rbnd_t)m->zfacts);
+	return res;
+}
+
+static __attribute__((pure)) size_t
+fsmap_nfacts(const struct fsmap_s *m)
+{
+	return m->rbt.nfacts;
+}
+
+static __attribute__((pure)) size_t
+fsmap_nsesqs(const struct fsmap_s *m)
+{
+	return m->nsesqs;
+}
+
+static inline __attribute__((nonnull(1))) sesquitmp_t
+fsmap_get(const struct fsmap_s *m, mut_oid_t fact)
+{
+	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
+
+	if (!RBND_NIL_P(nd)) {
+		mut_fof_t _1st = m->of[nd];
+		mut_fof_t last = m->tv[_1st].last;
+		return m->tv[last].tv;
+	}
+	return SESQUITMP_NOT_FOUND;
+}
+
+static inline  __attribute__((nonnull(1))) int
+fsmap_put(fsmap_t m, mut_oid_t fact, sesquitmp_t tvalid)
+{
+/* add TVALID to the list of tvalids for FACT. */
+	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
+
+	if (LIKELY(RBND_NIL_P(nd))) {
+		nd = fsmap_make_node(m);
+
+		rb_insert(mut_oid_t)(&m->rbt, nd, fact);
+		/* obtain a new sesqll object */
+		with (mut_fof_t of = m->nsesqs++) {
+			m->tv[of] = (struct sesqll_s){FOF_NOT_FOUND, of, tvalid};
+			m->of[nd] = of;
+		}
+		return 0;
+	}
+	/* otherwise update the validity,
+	 * move the current value to the backup slot */
+	with (mut_fof_t of = m->of[nd]) {
+		const mut_fof_t last = m->tv[of].last;
+		/* get us a new sesqll */
+		with (mut_fof_t nx = m->nsesqs++) {
+			m->tv[last].next = nx;
+			m->tv[nx] = (struct sesqll_s){FOF_NOT_FOUND, 0, tvalid};
+			m->tv[of].last = nx;
+		};
+	}
+	return 1;
+}
+
+static __attribute__((nonnull(1, 2))) size_t
+bang_fsmap(struct fpage_s *restrict p, const struct fsmap_s *m)
+{
+	size_t i;
+	size_t ns;
+
+	i = 0U;
+	FOREACH_KEY(mut_oid_t, f, &m->rbt) {
+		p->facts[i++] = f;
+	}
+	i = 0U;
+	ns = 0U;
+	FOREACH_RBN(n, mut_oid_t, &m->rbt) {
+		mut_fof_t nx = m->of[n];
+
+		do {
+			p->tvalids[ns++] = m->tv[nx].tv;
+			nx = m->tv[nx].next;
+		} while (!FOF_NOT_FOUND_P(nx));
+
+		p->fof[i++] = ns;
+	}
+	return i;
+}
+
+
+/* administrative stuff */
+static int
+bang_thdr(struct tpage_s *restrict tgt)
+{
+	memcpy(tgt->hdr.magic, "MUTB", 4U);
+	tgt->hdr.ver = 1U;
+	tgt->hdr.pty = PTY_TRANS;
+	tgt->hdr.nxpp = NXPP;
+	return 0;
+}
+
+static int
+_materialise(_stor_t _s)
+{
+/* bring current page into form for permanent storage */
+	int rc = 0;
+
+	/* header fiddling */
+	rc += bang_thdr(_s->curp->t);
+
+	/* finalise the current tof/trans pair */
+	with (size_t ntrans = _s->curp->t->hdr.ntrans) {
+		if (LIKELY(ntrans)) {
+			const size_t of = _s->curp->t->tof[ntrans - 1U];
+			_s->curp->t->tof[ntrans - 1U] =
+				bang_tfmap(_s->curp->t, _s->tfm, of);
+		}
+	}
+	return rc;
+}
+
+static int
+bang_fhdr(struct fpage_s *restrict tgt)
+{
+	memcpy(tgt->hdr.magic, "MUTB", 4U);
+	tgt->hdr.ver = 1U;
+	tgt->hdr.pty = PTY_FHIST;
+	tgt->hdr.nxpp = NXPP;
+	return 0;
+}
+
+static int
+_materialise2(_stor_t _s)
+{
+/* bring current page into form for permanent storage */
+	int rc = 0;
+
+	/* header fiddling */
+	rc += bang_fhdr(_s[1U].curp->f);
+
+	/* finalise the current tof/trans pair */
+	with (size_t nfacts = bang_fsmap(_s[1U].curp->f, _s[1U].fsm)) {
+		_s[1U].curp->f->hdr.nfacts = nfacts;
+	}
+	return 0;
+}
+
+static int
+_extend(_stor_t _s)
+{
+/* munmap current page, extend the file and map a new current page */
+	int rc = _materialise(_s);
+
+	munmap(_s->curp, PGSZ);
+	_s->curp = NULL;
+	_s->last = ECHS_NUL_INSTANT;
+
+	/* calc new size */
+	with (const off_t ol = _s->fz, nu = ol + PGSZ) {
+		void *curp;
+
+		if (UNLIKELY(ftruncate(_s->fd, nu) < 0)) {
+			return -1;
+		}
+
+		/* load the trunc'd page to scribble in */
+		curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, _s->fd, ol);
+		if (UNLIKELY(curp == MAP_FAILED)) {
+			return -1;
+		}
+
+		/* otherwise this is the latest shit */
+		_s->curp = curp;
+		_s->fz = nu;
+		clr_tfmap(_s->tfm);
+	}
+	return rc;
+}
+
+static int
+_extend2(_stor_t _s)
+{
+/* munmap current page, extend the file and map a new current page */
+	int rc = _materialise2(_s);
+
+	munmap(_s[1U].curp, PGSZ);
+	_s[1U].curp = NULL;
+	_s[1U].last = ECHS_NUL_INSTANT;
+
+	/* calc new size */
+	with (const off_t ol = _s[1U].fz, nu = ol + PGSZ) {
+		void *curp;
+
+		if (UNLIKELY(ftruncate(_s[1U].fd, nu) < 0)) {
+			return -1;
+		}
+
+		/* load the trunc'd page to scribble in */
+		curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, _s[1U].fd, ol);
+		if (UNLIKELY(curp == MAP_FAILED)) {
+			return -1;
+		}
+
+		/* otherwise this is the latest shit */
+		_s[1U].curp = curp;
+		_s[1U].fz = nu;
+		clr_fsmap(_s[1U].fsm);
+	}
+	return rc;
 }
 
 static inline __attribute__((nonnull(1), pure)) size_t
@@ -206,7 +673,7 @@ _stor_cached_p(struct _stor_s *restrict s, mut_pno_t p)
 	return PNO_NOT_CACHED;
 }
 
-static const struct page_s*
+static page_t
 _stor_load_page(struct _stor_s *restrict s, mut_pno_t p)
 {
 	size_t pi;
@@ -235,634 +702,139 @@ _stor_load_page(struct _stor_s *restrict s, mut_pno_t p)
 	return s->cachp[pi];
 }
 
-static inline __attribute__((nonnull(1))) echs_instant_t
-_stor_get_trans(struct _stor_s *restrict s, mut_tid_t t)
-{
-	/* find the page first */
-	const mut_pno_t pno = t / NXPP;
-	const struct page_s *p = _stor_load_page(s, pno);
-	return p->trans[t % NXPP];
-}
-
-static inline __attribute__((nonnull(1))) mut_oid_t
-_stor_get_fact(struct _stor_s *restrict s, mut_tid_t t)
-{
-	/* find the page first */
-	const mut_pno_t pno = t / NXPP;
-	const struct page_s *p = _stor_load_page(s, pno);
-	return p->facts[t % NXPP];
-}
-
-static inline __attribute__((nonnull(1))) echs_range_t
-_stor_get_valid(struct _stor_s *restrict s, mut_tid_t t)
-{
-	/* find the page first */
-	const mut_pno_t pno = t / NXPP;
-	const struct page_s *p = _stor_load_page(s, pno);
-	return p->valids[t % NXPP];
-}
-
 
-/* ftmap fiddling, materialised rb.h */
-typedef int32_t ftnd_t;
-
-#define FTND_NIL	((ftnd_t)-1)
-#define FTND_NIL_P(x)	(!~(x))
-
-struct ftnd_s {
-	mut_oid_t fact;
-	ftnd_t left;
-#if defined WORDS_BIGENDIAN
-	ftnd_t rght:31;
-	ftnd_t redp:1;
-#else  /* !WORDS_BIGENDIAN */
-	ftnd_t redp:1;
-	ftnd_t rght:31;
-#endif	/* WORDS_BIGENDIAN */
+/* page-wise stuff */
+struct mut_tof_s {
+	mut_tof_t t;
+	mut_tof_t of;
 };
 
-struct fttr_s {
-	/* mimic a struct ftnd_s here */
-	struct {
-		mut_oid_t nfacts;
-		ftnd_t root;
-		ftnd_t pad;
-	};
-	struct ftnd_s base[];
-};
-
-struct rbstk_s {
-	uint32_t depth;
-	uint32_t k;
-	ftnd_t n[sizeof(void*) << 4U];
-};
-
-static void
-rbti_fill(struct rbstk_s *restrict s, const struct fttr_s *t, ftnd_t of)
+static __attribute__((nonnull(1), pure)) mut_tof_t
+xbsearch_fact(const mut_oid_t *f, size_t lo, size_t hi, mut_oid_t fact)
 {
-/* treat OF as root and fill S with left nodes */
-	const struct ftnd_s *const base = t->base;
-	for (; !FTND_NIL_P(of); s->n[s->depth++] = of, of = base[of].left);
-	return;
-}
+	/* bisection */
+	while (hi - lo > 64U / sizeof(fact)) {
+		size_t mid = (lo + hi) / 2U;
 
-static inline ftnd_t
-rbti_pop(struct rbstk_s *restrict s, const struct fttr_s *t)
-{
-	if (LIKELY(s->depth)) {
-		ftnd_t nd = s->n[--s->depth];
-
-		if ((s->k ^= 1U)) {
-			rbti_fill(s, t, t->base[nd].rght);
-		}
-		return nd;
-	}
-	return FTND_NIL;
-}
-
-#define FOREACH_RBN(_nd, _rbt)						\
-	with (ftnd_t _nd)						\
-		with (struct rbstk_s __stk = {0U})			\
-		for (rbti_fill(&__stk, _rbt, (_rbt)->root);		\
-		     !FTND_NIL_P(_nd = rbti_pop(&__stk, _rbt));)
-
-#define FOREACH_RBN_FACT(_nd, _f, _rbt)					\
-	FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
-
-#define FOREACH_FACT(_f, _rbt)						\
-	FOREACH_RBN(_nd, _rbt)						\
-	with (mut_oid_t _f = (_rbt)->base[_nd].fact)
-
-static inline __attribute__((const, pure)) int
-rb_cmp(mut_oid_t a, mut_oid_t b)
-{
-	return a - b;
-}
-
-static ftnd_t
-rb_search(const struct fttr_s *t, mut_oid_t fact)
-{
-	const struct ftnd_s *const base = t->base;
-	ftnd_t ro = t->root;
-	int cmp;
-
-	while (!FTND_NIL_P(ro) && (cmp = rb_cmp(fact, base[ro].fact))) {
-		if (cmp < 0) {
-			ro = base[ro].left;
-		} else /*if (cmp > 0)*/ {
-			ro = base[ro].rght;
-		}
-	}
-	return ro;
-}
-
-static void
-rb_insert(struct fttr_s *restrict t, ftnd_t nd, mut_oid_t fact)
-{
-	struct ftnd_s *const restrict base = t->base;
-	struct {
-		ftnd_t no;
-		int cmp;
-	} path[sizeof(void*) << 4U], *pp = path;
-
-#define rbtn_rot_left(base, nd)				\
-	({						\
-		ftnd_t __res = base[nd].rght;		\
-		base[nd].rght = base[__res].left;	\
-		base[__res].left = nd;			\
-		__res;					\
-	})
-
-#define rbtn_rot_rght(base, nd)				\
-	({						\
-		ftnd_t __res = base[nd].left;		\
-		base[nd].left = base[__res].rght;	\
-		base[__res].rght = nd;			\
-		__res;					\
-	})
-
-	/* wind */
-	for (pp->no = t->root; !FTND_NIL_P(pp->no); pp++) {
-		int cmp = pp->cmp = rb_cmp(fact, base[pp->no].fact);
-
-		assert(cmp != 0);
-		if (cmp < 0) {
-			pp[1U].no = base[pp->no].left;
-		} else /*if (cmp > 0)*/ {
-			pp[1U].no = base[pp->no].rght;
-		}
-	}
-	/* invariant: pp->no == NIL */
-	pp->no = nd;
-	/* also assign fact and init the node */
-	base[nd].fact = fact;
-
-	/* unwind */
-	for (pp--; pp >= path; pp--) {
-		ftnd_t cur = pp->no;
-
-		if (pp->cmp < 0) {
-			ftnd_t left = pp[1U].no;
-			base[cur].left = left;
-			if (base[left].redp) {
-				ftnd_t leftleft = base[left].left;
-				if (base[leftleft].redp) {
-					/* blacken leftleft */
-					base[leftleft].redp = 0U;
-					cur = rbtn_rot_rght(base, cur);
-				}
-			} else {
-				return;
-			}
-		} else /*if (cmp > 0)*/ {
-			ftnd_t rght = pp[1U].no;
-			base[cur].rght = rght;
-			if (base[rght].redp) {
-				ftnd_t left = base[cur].left;
-				if (base[left].redp) {
-					/* split 4-node */
-					base[left].redp = 0U;
-					base[rght].redp = 0U;
-					base[cur].redp = 1U;
-				} else {
-					/* lean left */
-					ftnd_t tmp;
-
-					tmp = rbtn_rot_left(base, cur);
-					base[tmp].redp = base[cur].redp;
-					base[cur].redp = 1U;
-					cur = tmp;
-				}
-			} else {
-				return;
-			}
-		}
-		pp->no = cur;
-	}
-#undef rbtn_rot_left
-#undef rbtn_rot_rght
-	/* set root and paint it black */
-	t->root = path->no;
-	base[t->root].redp = 0U;
-	return;
-}
-
-
-/* ftmaps on top of red-black trees */
-typedef struct ftmap_s {
-	size_t zfacts;
-	mut_fof_t *fof;
-	/* vla! */
-	struct fttr_s rbt;
-} *ftmap_t;
-
-static int
-clr_ftmap(ftmap_t m)
-{
-	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
-	m->rbt.nfacts = 0U;
-	return 0;
-}
-
-static ftmap_t
-make_ftmap(size_t nnd)
-{
-	ftmap_t res = malloc(sizeof(*res) + nnd * sizeof(*res->rbt.base));
-	void *fof;
-
-	if (UNLIKELY(res == NULL)) {
-		return NULL;
-	} else if (UNLIKELY((fof = malloc(nnd * sizeof(*res->fof))) == NULL)) {
-		free(res);
-		return NULL;
-	}
-	/* go ahead initialising */
-	res->zfacts = nnd;
-	res->fof = fof;
-	clr_ftmap(res);
-	return res;
-}
-
-static void
-free_ftmap(ftmap_t m)
-{
-	if (LIKELY(m->fof != NULL)) {
-		free(m->fof);
-	}
-	free(m);
-	return;
-}
-
-static ftnd_t
-ftmap_make_node(ftmap_t m)
-{
-	ftnd_t res = m->rbt.nfacts++;
-	assert(res < (ftnd_t)NXPP);
-	return res;
-}
-
-static inline mut_fof_t*
-ftmap_get(ftmap_t m, mut_oid_t fact)
-{
-	ftnd_t ro = rb_search(&m->rbt, fact);
-
-	if (UNLIKELY(FTND_NIL_P(ro))) {
-		return NULL;
-	}
-	return m->fof + ro;
-}
-
-static inline mut_fof_t*
-ftmap_put(ftmap_t m, mut_oid_t fact)
-{
-	ftnd_t nd = ftmap_make_node(m);
-
-	rb_insert(&m->rbt, nd, fact);
-	return m->fof + nd;
-}
-
-static __attribute__((nonnull(1), flatten)) mut_tid_t
-ftmap_get_last(ftmap_t m, mut_oid_t fact)
-{
-	const mut_fof_t *f = ftmap_get(m, fact);
-
-	if (UNLIKELY(f == NULL)) {
-		return TID_NOT_FOUND;
-	}
-	return f->last;
-}
-
-static __attribute__((nonnull(1), flatten)) mut_tid_t
-ftmap_get_first(ftmap_t m, mut_oid_t fact)
-{
-	const mut_fof_t *f = ftmap_get(m, fact);
-
-	if (UNLIKELY(f == NULL)) {
-		return TID_NOT_FOUND;
-	}
-	return f->_1st;
-}
-
-static int
-ftmap_put_last(ftmap_t m, mut_oid_t fact, mut_tid_t last)
-{
-	mut_fof_t *f = ftmap_get(m, fact);
-
-	if (UNLIKELY(f == NULL)) {
-		/* prep the key */
-		f = ftmap_put(m, fact);
-		f->_1st = last;
-	}
-	f->last = last;
-	return 0;
-}
-
-static int
-bang_ftmap(struct page_s *restrict tgt, const struct ftmap_s *m)
-{
-	with (mut_oid_t *restrict tp = tgt->ftm) {
-		FOREACH_FACT(f, &m->rbt) {
-			*tp++ = f;
-		}
-	}
-	with (mut_fof_t *restrict fp = tgt->fof) {
-		FOREACH_RBN(n, &m->rbt) {
-			*fp++ = m->fof[n];
-		}
-	}
-	return 0;
-}
-
-
-/* ftmaps in materialised pages */
-static inline const mut_fof_t*
-page_ftm_get(const struct page_s *p, mut_oid_t fact)
-{
-/* a page always has NXPP facts in sorted order
- * we now do a simple bsearch(3) till we find the right block
- * a block coincides with the cacheline size (64b) */
-	uint_fast32_t lo = 0U;
-	uint_fast32_t hi = NXPP;
-
-	/* we want log(NXPP) - log(x) many steps, with x being
-	 * the number of facts in a 64B cacheline */
-	for (size_t i = NXPP / (64U / sizeof(fact)) - 1U; i; i >>= 1U) {
-		uint_fast32_t mid = (lo + hi) / 2U;
-
-		if (p->ftm[mid] > fact) {
+		if (f[mid] > fact) {
 			hi = mid;
 		} else {
 			lo = mid;
 		}
 	}
-	/* at last we just scan the whole cacheline, 8 mut_oid_t objects */
-	assert(hi - lo == 64U / sizeof(fact));
+	/* scan the cacheline, <=8 mut_oid_t objects */
+	assert(hi - lo <= 64U / sizeof(fact));
 	for (; lo < hi; lo++) {
-		if (p->ftm[lo] == fact) {
-			return p->fof + lo;
+		if (f[lo] == fact) {
+			return lo;
 		}
 	}
-	return NULL;
+	return TOF_NOT_FOUND;
 }
 
-static __attribute__((nonnull(1), flatten)) mut_tid_t
-page_ftm_get_last(const struct page_s *p, mut_oid_t fact)
+static __attribute__((nonnull(1), pure)) struct mut_tof_s
+tpage_get_tof(const struct tpage_s *p, mut_oid_t fact)
 {
-	const mut_fof_t *fof = page_ftm_get(p, fact);
+	for (size_t i = 0U, itof = 0U; i < p->hdr.ntrans; i++) {
+		/* look at [itof, etof) */
+		const size_t etof = p->tof[i];
+		mut_tof_t o = xbsearch_fact(p->facts, itof, etof, fact);
 
-	if (fof == NULL) {
-		return TID_NOT_FOUND;
+		if (!TOF_NOT_FOUND_P(o)) {
+			return (struct mut_tof_s){i, o};
+		}
 	}
-	return fof->last;
+	return (struct mut_tof_s){TOF_NOT_FOUND, TOF_NOT_FOUND};
+}
+
+static __attribute__((nonnull(1), pure)) mut_fof_t
+fpage_get_fof(const struct fpage_s *p, mut_oid_t fact)
+{
+	const size_t etof = p->hdr.nfacts;
+	return xbsearch_fact(p->facts, 0U, etof, fact);
 }
 
 
-/* meta */
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
-	mut_tid_t t = ftmap_get_last(s->ftm, fact);
+/* retrieve one fact as of the current time stamp */
+	sesquitmp_t tv;
 
-	if (!TID_NOT_FOUND_P(t)) {
+	/* is it in our big fact-cache? */
+	if (!SESQUITMP_NOT_FOUND_P((tv = fsmap_get(s[1U].fsm, fact)))) {
+		/* we're so lucky */
 		goto tid_found;
 	}
-	/* time to hit the caches now */
-	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
-		const struct page_s *p = _stor_load_page(s, pi);
+	/* disastrous fail, try previous pages */
+	for (mut_pno_t pi = s[1U].fz / PGSZ; pi-- > 0U;) {
+		page_t p = _stor_load_page(s + 1U, pi);
+		mut_fof_t fof = fpage_get_fof(p->f, fact);
 
-		if (!TID_NOT_FOUND_P(t = page_ftm_get_last(p, fact))) {
+		if (!FOF_NOT_FOUND_P(fof)) {
+			/* tv offset is in p->f->fof */
+			const size_t tvof = p->f->fof[fof];
+			assert(tvof);
+			tv = p->f->tvalids[tvof - 1U];
 			goto tid_found;
 		}
 	}
+	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
-
 tid_found:
-	/* yay, dead or alive, it's in our books */
-	return (echs_bitmp_t){
-		_stor_get_valid(s, t),
-		ECHS_RANGE_FROM(_stor_get_trans(s, t)),
-	};
+	return (echs_bitmp_t){tv.v, ECHS_RANGE_FROM(tv.t)};
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
-/* we do a backward-forward scan:
- * on a given page, look for the first fiddle with FACT,
- * if > AS_OF, go back one page
- * if <= AS_OF traverse forwards to find the FIRST_AFTER */
-	const mut_fof_t *fof = ftmap_get(s->ftm, fact);
-	mut_tid_t i_last_before = TID_NOT_FOUND;
-	mut_tid_t i_first_after = TID_NOT_FOUND;
-	echs_instant_t ti_before;
-	echs_instant_t ti_after;
+/* retrieve one fact as of the time stamp specified */
+	/* find the most recent checkpoint before/on AS_OF */
+	mut_pno_t p = PNO_NOT_CACHED;
 
-	if (fof != NULL) {
-		/* lucky! */
-		i_last_before = fof->_1st;
-		ti_before = _stor_get_trans(s, i_last_before);
+#if 0
+	/* build the vfmap */
+	if (!PNO_NOT_CACHED_P(p)) {
+		for (; (int32_t)p < s->fz / PGSZ; p++) {
+			page_t cp = _stor_load_page(s, p);
 
-		if (echs_instant_le_p(ti_before, as_of)) {
-			if (i_last_before == fof->last) {
-				/* oh my god, we nailed it */
-				goto found;
-			}
-			/* knew it, it was too good to be true */
-			goto fwd_scan;
-		}
-	}
-	/* either FACT isn't featured on the current page or
-	 * AS_OF < TRANS(i_last_before)
-	 * either way, we have to consult the previous pages */
-	for (mut_pno_t pi = s->ntrans / NXPP; pi-- > 0U;) {
-		const struct page_s *p = _stor_load_page(s, pi);
-		echs_instant_t ti;
-		mut_tid_t i;
-
-		if ((fof = page_ftm_get(p, fact)) == NULL) {
-			continue;
-		}
-		/* otherwise let's see if we can initiate the forward scan */
-		i_last_before = fof->_1st;
-		ti_before = _stor_get_trans(s, i_last_before);
-
-		if (!echs_instant_le_p(ti_before, as_of)) {
-			/* maybe we're lucky next time
-			 * however we'll track this instance on the way down
-			 * so we don't have to look for the first_after
-			 * bound later on */
-			i_first_after = i_last_before;
-			ti_after = ti_before;
-			continue;
-		}
-
-	fwd_scan:
-		/* scan forwards, we know that f->last >= AS_OF
-		 * otherwise we'd be in _get_as_of_now() */
-		for (i = i_last_before;
-		     i < fof->last &&
-			     (ti = _stor_get_trans(s, i),
-			      echs_instant_le_p(ti, as_of)); i++) {
-			if (fact == _stor_get_fact(s, i)) {
-				i_last_before = i;
-				ti_before = ti;
-			}
-		}
-		/* found the definite before trans
-		 * keep scanning, because the fact might have been
-		 * superseded by a more recent transaction */
-		for (; i < fof->last; i++) {
-			if (fact == _stor_get_fact(s, i)) {
-				i_first_after = i;
-				ti_after = _stor_get_trans(s, i);
+			if (cp->hdr.pty != PTY_CHKPT) {
 				break;
 			}
-		}
-		goto found;
-	}
-	return ECHS_NUL_BITMP;
-
-found:
-	/* now I_FIRST_AFTER should hold FACT_NOT_FOUND or the index of
-	 * the next fiddle with FACT on or after AS_OF */
-	if (TID_NOT_FOUND_P(i_first_after)) {
-		/* must be open-ended */
-		return (echs_bitmp_t){
-			_stor_get_valid(s, i_last_before),
-			ECHS_RANGE_FROM(ti_before)
-		};
-	}
-
-	/* yay, dead or alive, it's in our books */
-	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
-	return (echs_bitmp_t){
-		_stor_get_valid(s, i_last_before),
-		(echs_range_t){ti_before, ti_after},
-	};
-}
-
-static __attribute__((nonnull(1))) size_t
-_bitte_rtr_as_of_now(_stor_t s, mut_oid_t *restrict fact, size_t nfact)
-{
-/* current transaction time-slice, very naive */
-	size_t res = 0U;
-
-	return res;
-}
-
-static __attribute__((nonnull(1))) size_t
-_bitte_rtr(
-	_stor_t s, mut_oid_t *restrict fact, size_t nfact,
-	echs_instant_t as_of)
-{
-	/* cache index */
-	size_t ci;
-	/* timeline index */
-	mut_tid_t ti = 0U;
-	size_t res = 0U;
-
-#if 0
-	/* try caches */
-	for (ci = 0U; ci < s->ncache; ci++) {
-		if (!echs_instant_lt_p(as_of, s->cache[ci].trans)) {
-			/* found one */
-			goto evolv;
+			/* otherwise add more stuff to the vfmap */
+			;
 		}
 	}
-	if (0) {
-	evolv:
-		/* yay, found a cache we can evolve,
-		 * find highest offset into trans so we know where to
-		 * start scanning */
-		FTMAP_FOREACH(i, s->cache + ci) {
-			if (s->cache[ci].span[i].last > ti) {
-				ti = s->cache[ci].span[i].last;
+
+	/* now look for trans pages */
+	for (; p < s->fz / PGSZ; p++) {
+		const struct page_s *tp = _stor_load_page(s, p);
+
+		if (tp->hdr.pty != PTY_TRANS) {
+			break;
+		} else if (!tp->hdr.ntrans) {
+			break;
+		}
+		/* otherwise go through the transactions */
+		for (mut_tof_t i = 0U; i < tp->hdr.ntrans; i++) {
+			if (!echs_instant_lt_p(tp->trans[i], as_of)) {
+				/* big break, we're too far */
+				goto bang;
 			}
-		}
-		/* we can start a bit later since the TI-th offset is covered */
-		ti++;
-	} else if (LIKELY(s->ncache < countof(s->cache))) {
-		/* have to start a new cache object, we're guaranteed
-		 * that we can insert at the back because the cache is
-		 * sorted in reverse chronological order */
-		assert(s->live.nfacts);
-		assert(ci == s->ncache);
-
-		s->ncache++;
-	} else {
-		/* grml, looks like we have to bin a cache item */
-		return 0U;
-	}
-	/* now start materialising the cache */
-	for (echs_instant_t t;
-	     ti < _stor_ntrans(s) &&
-		     (t = _stor_get_trans(s, ti), echs_instant_le_p(t, as_of));
-	     ti++) {
-		const mut_oid_t f = _stor_get_fact(s, ti);
-		ftmap_put_last(s->cache + ci, f, ti);
-	}
-
-	/* same as _bitte_rtr_as_of_now() now */
-	FTMAP_FOREACH(i, s->cache + ci) {
-		fact[res++] = (mut_oid_t)s->cache[ci].span[i].last;
-		if (UNLIKELY(res >= nfact)) {
-			break;
+			/* bang onto vfmap */
+			;
 		}
 	}
+bang:
 #endif
-	return res;
-}
-
-static __attribute__((nonnull(1))) echs_range_t
-_bitte_trend(const struct _stor_s *s, mut_tid_t t)
-{
-/* return the transaction interval for transaction T */
-#if 0
-	const mut_oid_t f = _stor_get_fact(s, t);
-	const mut_tid_t hi = ftmap_get_last(&s->live, f);
-	echs_range_t res;
-
-	assert(!TID_NOT_FOUND_P(hi));
-	if (hi == t) {
-		/* this transaction is still current, i.e. open-ended */
-		return ECHS_RANGE_FROM(_stor_get_trans(s, t));
-	}
-	assert(t < hi);
-
-	/* best known upper bound is the one in the live blob */
-	res = (echs_range_t){_stor_get_trans(s, t), _stor_get_trans(s, hi)};
-	/* and now scan the timeline between T and HI */
-	for (mut_tid_t i = t + 1U; i < hi; i++) {
-		if (f == _stor_get_fact(s, i)) {
-			res.till = _stor_get_trans(s, i);
-			break;
-		}
-	}
-	return res;
-#endif
-}
-
-static __attribute__((nonnull(1))) void
-_bitte_trends(
-	const struct _stor_s *s, echs_range_t *restrict tt,
-	const mut_tid_t *t, size_t nt)
-{
-/* TRansaction ENDs, obtain offsets in OF find the transaction time range */
-	/* try and lookup each of the facts in the live blob */
-	for (size_t i = 0U; i < nt; i++) {
-		const mut_tid_t o = t[i];
-
-		tt[i] = _bitte_trend(s, o);
-	}
-	return;
+	return ECHS_NUL_BITMP;
 }
 
 
 static mut_stor_t
 _open(const char *fn, int fl)
 {
-	struct _stor_s *res;
+	struct _stor_s *res = NULL;
 	void *curp = NULL;
 	struct stat st;
 	int fd;
@@ -889,132 +861,128 @@ _open(const char *fn, int fl)
 		goto clo;
 	}
 	/* mem store they want, good */
-	res = calloc(1, sizeof(struct _stor_s));
+	if ((res = calloc(2, sizeof(struct _stor_s))) == NULL) {
+		goto mun;
+	}
 	res->fd = fd;
 	res->curp = curp;
 	/* quickly guess the number of transactions */
-	res->ntrans = (st.st_size - 1U) / PGSZ * NXPP;
-	/* get some more initialisation work done */
-	res->ftm = make_ftmap(NXPP);
+	res->fz = st.st_size;
+	/* initialise our maps */
+	res->tfm = make_tfmap(2U * NXPP);
+
+	/* initialise the second guy, fact -> tv sesquis */
+	if (0) {
+		;
+	} else if (UNLIKELY((fd = open(".facts", fl, 0666)) < 0)) {
+		goto out;
+	} else if (!(fl & O_RDWR)) {
+		/* aaah, read-only, aye aye */
+		;
+	} else if ((fl & O_TRUNC) && UNLIKELY(ftruncate(fd, PGSZ) < 0)) {
+		goto clo;
+	} else if (UNLIKELY(fstat(fd, &st) < 0)) {
+		goto clo;
+	} else if (UNLIKELY(!st.st_size)) {
+		goto clo;
+	} else if ((
+		{
+			/* load last page to scribble in */
+			const off_t of = (st.st_size - 1U) & ~(PGSZ - 1U);
+			curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, fd, of);
+		}) == MAP_FAILED) {
+		goto mun;
+	}
+	/* assignments for fact->tv map */
+	res[1U].fd = fd;
+	res[1U].curp = curp;
+	/* quickly guess the number of transactions */
+	res[1U].fz = st.st_size;
+	/* another fact map */
+	res[1U].fsm = make_fsmap(NXPP);
+	/* yay */
 	return (mut_stor_t)res;
+
+mun:
+	munmap(curp, PGSZ);
 clo:
 	close(fd);
-	return NULL;
+out:
+	return (mut_stor_t)res;
 }
 
-static int
-_materialise(_stor_t _s)
-{
-/* bring current page into form for permanent storage */
-	int rc = 0;
-
-	rc += bang_ftmap(_s->curp, _s->ftm);
-	return rc;
-}
-
-static void
+static __attribute__((nonnull(1))) void
 _close(mut_stor_t s)
 {
 	_stor_t _s = (_stor_t)s;
 
 	/* materialise */
 	_materialise(_s);
-	/* finalise the ftmap */
-	free_ftmap(_s->ftm);
+	_materialise2(_s);
+	/* cleaning up maps */
+	free_tfmap(_s->tfm);
 	/* munmap current page */
 	munmap(_s->curp, PGSZ);
-	/* munmap any cached pages */
-	for (size_t i = countof(_s->cachp) - _s->ncach;
-	     i < countof(_s->cachp); i++) {
-		(void)munmap(deconst(_s->cachp[i]), PGSZ);
-		_s->cachp[i] = NULL;
-		_s->cachn[i] = 0U;
+	/* close descriptor */
+	close(_s->fd);
+	/* fact->tv mapping */
+	if (_s[1U].fd >= 0) {
+		munmap(_s[1U].curp, PGSZ);
+		close(_s[1U].fd);
+		free_fsmap(_s[1U].fsm);
 	}
-	if (s != NULL) {
-		free(_s);
-	}
+	free(_s);
 	return;
-}
-
-static int
-_extend(_stor_t _s)
-{
-/* munmap current page, extend the file and map a new current page */
-	munmap(_s->curp, PGSZ);
-	_s->curp = NULL;
-
-	/* calc new size */
-	with (const off_t ol = _s->ntrans / NXPP * PGSZ, nu = ol + PGSZ) {
-		void *curp;
-
-		if (UNLIKELY(ftruncate(_s->fd, nu) < 0)) {
-			return -1;
-		}
-
-		/* load the trunc'd page to scribble in */
-		curp = mmap(NULL, PGSZ, PROT_RW, MAP_SHARED, _s->fd, ol);
-		if (UNLIKELY(curp == MAP_FAILED)) {
-			return -1;
-		}
-
-		/* otherwise this is the latest shit */
-		_s->curp = curp;
-		clr_ftmap(_s->ftm);
-	}
-	return 0;
 }
 
 static int
 _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 {
 	_stor_t _s = (_stor_t)s;
-	int rc = -1;
+	const echs_instant_t t = echs_now();
+	int rc = 0;
 
 	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		return -1;
 	}
 	/* stamp off then */
-	with (echs_instant_t t = echs_now()) {
-		const size_t it = _s->ntrans++ % NXPP;
+	with (const size_t ntrans = _s->curp->t->hdr.ntrans) {
+		if (!echs_instant_eq_p(t, _s->last)) {
+			if (LIKELY(ntrans)) {
+				const size_t o = _s->curp->t->tof[ntrans - 1U];
+				size_t nbang =
+					bang_tfmap(_s->curp->t, _s->tfm, o);
 
-		_s->curp->trans[it] = t;
-		_s->curp->facts[it] = fact;
-		_s->curp->valids[it] = valid;
+				_s->curp->t->tof[ntrans - 1U] = nbang;
+				_s->curp->t->tof[ntrans] = nbang;
+			}
+			/* otherwise just start the whole shebang */
+			_s->curp->t->trans[_s->curp->t->hdr.ntrans++] =
+				_s->last = t;
+			clr_tfmap(_s->tfm);
+		}
+		/* bang */
+		if (tfmap_put(_s->tfm, fact, valid) == 0) {
+			_s->curp->t->hdr.nfacts++;
+		}
 
-		ftmap_put_last(_s->ftm, fact, it);
+		if (UNLIKELY(_s->curp->t->hdr.nfacts >= 2U * NXPP) ||
+		    UNLIKELY(_s->curp->t->hdr.ntrans >= NXPP)) {
+			/* current page needs materialising */
+			rc += _extend(_s);
+		}
 	}
-	if (UNLIKELY(!(_s->ntrans % NXPP))) {
+	/* and bang onto fact line */
+	if (fsmap_put(_s[1U].fsm, fact, (sesquitmp_t){t, valid}) == 0) {
+		_s[1U].curp->f->hdr.ntvalids++;
+	}
+
+	if (UNLIKELY(_s[1U].curp->f->hdr.ntvalids >= 2U * NXPP) ||
+	    UNLIKELY(fsmap_nfacts(_s[1U].fsm) >= NXPP)) {
 		/* current page needs materialising */
-		rc += _materialise(_s);
-		rc += _extend(_s);
+		rc += _extend2(_s);
 	}
 	return rc;
-}
-
-static int
-_rem(mut_stor_t s, mut_oid_t fact)
-{
-	_stor_t _s = (_stor_t)s;
-	const mut_tid_t t = ftmap_get_last(_s->ftm, fact);
-
-	if (TID_NOT_FOUND_P(t)) {
-		/* he's dead already */
-		return -1;
-	} else if (echs_nul_range_p(_stor_get_valid(_s, t))) {
-		/* dead already, just */
-		return -1;
-	}
-	/* otherwise kill him */
-	with (echs_instant_t now = echs_now()) {
-		const size_t it = _s->ntrans++ % NXPP;
-
-		_s->curp->trans[it] = now;
-		_s->curp->facts[it] = fact;
-		_s->curp->valids[it] = echs_nul_range();
-
-		ftmap_put_last(_s->ftm, fact, it);
-	}
-	return 0;
 }
 
 static echs_bitmp_t
@@ -1022,13 +990,13 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 	_stor_t _s = (_stor_t)s;
 
-	if (UNLIKELY(!_s->ntrans || fact == MUT_NUL_OID)) {
+	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		/* no transactions in this store, trivial*/
 		return ECHS_NUL_BITMP;
 	}
 	/* if AS_OF is >= the stamp of the last transaction, just use
 	 * the live table. */
-	else if (true/*echs_instant_le_p(_s->live.trans, as_of)*/) {
+	else if (echs_instant_le_p(_s->last, as_of)) {
 		return _get_as_of_now(_s, fact);
 	}
 	/* otherwise proceed to scan */
@@ -1036,207 +1004,50 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 }
 
 static int
-_supersede(
-	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
+_ssd(mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	_stor_t _s = (_stor_t)s;
-	const mut_tid_t ot = ftmap_get_last(_s->ftm, old);
+/* ssd (supersede) is short for
+ * v <- _get(old)
+ * _put(old, (echs_range_t){[v.from, valid.from)})
+ * _put(new, valid) */
+	echs_bitmp_t v = _get(s, old, ECHS_SOON);
+	int rc = 0;
 
-#if 0
-	if (TID_NOT_FOUND_P(ot)) {
-		/* must be dead, cannot supersede */
+	if (!echs_nul_range_p(v.valid)) {
 		return -1;
 	}
+	/* invalidate old cell */
+	rc += _put(s, old, (echs_range_t){v.valid.from, valid.from});
+	/* punch new cell */
+	rc += _put(s, new, valid);
+	return rc;
+}
 
-	/* otherwise make room for some (i.e. 2) insertions */
-	if (UNLIKELY(tmln_chkz(&_s->tmln, 2U) < 0)) {
+static int
+_rem(mut_stor_t s, mut_oid_t fact)
+{
+/* rem is short for
+ * v <- _get(fact)
+ * if (v) _put(fact, (echs_range_t){[)}) */
+	echs_bitmp_t v = _get(s, fact, ECHS_SOON);
+
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
 		return -1;
 	}
-	/* atomically handle the supersedure */
-	with (echs_instant_t t = echs_now()) {
-		/* old guy first */
-		with (const size_t it = _s->tmln.ntrans++) {
-			/* build new validity */
-			echs_range_t nuv = {
-				.from = _stor_get_valid(_s, ot).from,
-				.till = valid.from,
-			};
-
-			/* bang to timeline */
-			_s->tmln.trans[it] = t;
-			_s->tmln.facts[it] = old;
-			_s->tmln.valids[it] = nuv;
-
-			ftmap_put_last(&_s->live, old, it);
-		}
-		/* new guy now */
-		if (new != MUT_NUL_OID) {
-			const size_t it = _s->tmln.ntrans++;
-
-			/* bang to timeline */
-			_s->tmln.trans[it] = t;
-			_s->tmln.facts[it] = new;
-			_s->tmln.valids[it] = valid;
-
-			ftmap_put_last(&_s->live, new, it);
-		}
-	}
-#endif
-	return 0;
+	/* otherwise kill him */
+	return _put(s, fact, ECHS_NUL_RANGE);
 }
 
-/* hardest one so far */
-static size_t
-_rtr(
-	mut_stor_t s,
-	mut_oid_t *restrict fact, size_t nfact,
-	echs_range_t *restrict valid, echs_range_t *restrict trans,
-	echs_instant_t as_of)
-{
-/* we'll abuse the FACT array to store our offsets first,
- * then we'll copy the actual fact oids and valids and transs */
-	bool currentp;
-	size_t res;
-	_stor_t _s;
-
-#if 0
-	if (UNLIKELY(!_stor_ntrans(_s))) {
-		/* no transactions in this store, trivial*/
-		return 0U;
-	}
-	/* if AS_OF is >= the stamp of the last transaction, just use
-	 * the live table. */
-	else if ((currentp = echs_instant_le_p(_s->live.trans, as_of))) {
-		res = _bitte_rtr_as_of_now(_s, fact, nfact);
-	}
-	/* otherwise just do it the hard way */
-	else {
-		res = _bitte_rtr(_s, fact, nfact, as_of);
-	}
-
-	/* now we've got them offsets,
-	 * reiterate and assemble the arrays */
-	if (trans != NULL && currentp) {
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = fact[i];
-			trans[i] = ECHS_RANGE_FROM(_stor_get_trans(_s, o));
-		}
-	} else if (trans != NULL) {
-		/* cluster fuck, how do we know when trans[o] ends?
-		 * well, we scan again for any of the offsets in
-		 * FACT and find the next transaction and put it into
-		 * TRANS. */
-		_bitte_trends(_s, trans, fact, res);
-	}
-	if (valid != NULL) {
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = fact[i];
-			valid[i] = _stor_get_valid(_s, o);
-		}
-	}
-	/* ... and finally */
-	for (size_t i = 0U; i < res; i++) {
-		const size_t o = fact[i];
-		fact[i] = _stor_get_fact(_s, o);
-	}
-#endif
-	return res;
-}
-
-static size_t
-_scan(
-	mut_stor_t s,
-	mut_oid_t *restrict fact, size_t nfact,
-	echs_range_t *restrict valid, echs_range_t *restrict trans,
-	echs_instant_t vtime)
-{
-	size_t res = 0U;
-#if 0
-	_stor_t _s;
-
-	/* store offsets in FACT table first */
-	for (size_t i = 0U; i < _stor_ntrans(_s) && res < nfact; i++) {
-		if (echs_in_range_p(_stor_get_valid(_s, i), vtime)) {
-			fact[res++] = i;
-		}
-	}
-	/* go through FACT table and bang real objects */
-	if (trans != NULL) {
-		_bitte_trends(_s, trans, fact, res);
-	}
-	if (valid != NULL) {
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = fact[i];
-			valid[i] = _stor_get_valid(_s, o);
-		}
-	}
-	/* ... and finally */
-	for (size_t i = 0U; i < res; i++) {
-		const size_t o = fact[i];
-		fact[i] = _stor_get_fact(_s, o);
-	}
-#endif
-	return res;
-}
-
-static size_t
-_hist(
-	mut_stor_t s,
-	echs_range_t *restrict trans, size_t ntrans,
-	echs_range_t *restrict valid, mut_oid_t fact)
-{
-	size_t res = 0U;
-#if 0
-	const mut_tid_t t1 = ftmap_get_first(&_s->live, fact);
-	_stor_t _s;
-
-	if (UNLIKELY(TID_NOT_FOUND_P(t1))) {
-		/* if there's no last transaction, there can be no 1st either */
-		return 0U;
-	}
-	/* traverse the timeline and store offsets to transactions */
-	for (mut_tid_t i = t1; i < _stor_ntrans(_s) && res < ntrans; i++) {
-		if (fact == _stor_get_fact(_s, i)) {
-			trans[res++].from.u = i;
-		}
-	}
-
-	if (valid != NULL) {
-		for (size_t i = 0U; i < res; i++) {
-			const size_t o = trans[i].from.u;
-			valid[i] = _s->tmln.valids[o];
-		}
-	}
-
-	/* and lastly write down the real transactions */
-	for (size_t i = 1U; i < res; i++) {
-		const size_t of = trans[i - 1U].from.u;
-		const size_t ot = trans[i].from.u;
-
-		trans[i - 1U] = (echs_range_t){
-			_s->tmln.trans[of], _s->tmln.trans[ot]
-		};
-	}
-	/* last trans lasts forever */
-	if (res > 0U) {
-		const size_t o = trans[res - 1U].from.u;
-		trans[res - 1U] = ECHS_RANGE_FROM(_s->tmln.trans[o]);
-	}
-#endif
-	return res;
-}
 
 /* this sums up our implementation */
 struct bitte_backend_s IN_DSO(backend) = {
-	_open,
-	_close,
-	_get,
-	_put,
-	_supersede,
-	_rem,
-	_rtr,
-	_scan,
-	_hist,
+	.mut_stor_open_f = _open,
+	.mut_stor_close_f = _close,
+	.bitte_get_f = _get,
+	.bitte_put_f = _put,
+	.bitte_rem_f = _rem,
+	.bitte_supersede_f = _ssd,
 };
 
 /* bitte-dsk.c ends here */

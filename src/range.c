@@ -52,23 +52,4 @@ echs_range_coalesce(echs_range_t r1, echs_range_t r2)
 	return echs_nul_range();
 }
 
-
-/* sorting */
-#define T	echs_range_t
-
-static inline __attribute__((const, pure)) bool
-compare(T i1, T i2)
-{
-	return echs_instant_lt_p(i1.from, i2.from);
-}
-
-#include "wikisort.c"
-
-void
-echs_range_sort(echs_range_t *restrict in, size_t nin)
-{
-	WikiSort(in, nin);
-	return;
-}
-
 /* range.c ends here */
