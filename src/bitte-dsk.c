@@ -766,7 +766,7 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 	}
 	/* disastrous fail, try previous pages */
 	for (mut_pno_t pi = s[1U].fz / PGSZ; pi-- > 0U;) {
-		page_t p = _stor_load_page(s, pi);
+		page_t p = _stor_load_page(s + 1U, pi);
 		mut_fof_t fof = fpage_get_fof(p->f, fact);
 
 		if (!FOF_NOT_FOUND_P(fof)) {
