@@ -386,10 +386,17 @@ bang_tfmap(struct tpage_s *restrict p, const struct tfmap_s *m, size_t o)
 
 
 /* fact sesqui map */
+struct sesqll_s {
+	mut_fof_t next;
+	mut_fof_t last;
+	sesquitmp_t tv;
+};
+
 typedef struct fsmap_s {
 	size_t zfacts;
+	size_t nsesqs;
 	mut_fof_t *of;
-	sesquitmp_t *tv;
+	struct sesqll_s *tv;
 	/* vla */
 	struct RBTR_S(mut_oid_t) rbt;
 } *fsmap_t;
@@ -397,7 +404,8 @@ typedef struct fsmap_s {
 static int
 clr_fsmap(fsmap_t m)
 {
-	memset(m->of, 0, (m->zfacts) * sizeof(*m->of));
+	m->nsesqs = 0U;
+	memset(m->of, -1, (m->zfacts) * sizeof(*m->of));
 	memset(&m->rbt, -1, (m->zfacts + 1U) * sizeof(*m->rbt.base));
 	m->rbt.nfacts = 0U;
 	return 0;
@@ -456,15 +464,21 @@ fsmap_nfacts(const struct fsmap_s *m)
 	return m->rbt.nfacts;
 }
 
+static __attribute__((pure)) size_t
+fsmap_nsesqs(const struct fsmap_s *m)
+{
+	return m->nsesqs;
+}
+
 static inline __attribute__((nonnull(1))) sesquitmp_t
 fsmap_get(const struct fsmap_s *m, mut_oid_t fact)
 {
 	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
 
 	if (!RBND_NIL_P(nd)) {
-		if (m->of[nd]) {
-			return m->tv[m->of[nd] - 1U];
-		}
+		mut_fof_t _1st = m->of[nd];
+		mut_fof_t last = m->tv[_1st].last;
+		return m->tv[last].tv;
 	}
 	return SESQUITMP_NOT_FOUND;
 }
@@ -479,22 +493,23 @@ fsmap_put(fsmap_t m, mut_oid_t fact, sesquitmp_t tvalid)
 		nd = fsmap_make_node(m);
 
 		rb_insert(mut_oid_t)(&m->rbt, nd, fact);
-		/* get latest offset for tvalids */
-		with (mut_fof_t of = m->of[m->rbt.nfacts - 1U]++) {
-			m->tv[of] = tvalid;
+		/* obtain a new sesqll object */
+		with (mut_fof_t of = m->nsesqs++) {
+			m->tv[of] = (struct sesqll_s){FOF_NOT_FOUND, 0, tvalid};
+			m->of[nd] = of;
 		}
 		return 0;
 	}
 	/* otherwise update the validity,
 	 * move the current value to the backup slot */
 	with (mut_fof_t of = m->of[nd]) {
-		memmove(m->tv + of + 1U, m->tv + of,
-			(m->zfacts - of - 1U) * sizeof(*m->tv));
-		m->tv[of] = tvalid;
-		/* adapt other offsets */
-		for (; (size_t)nd < m->rbt.nfacts; nd++) {
-			m->of[nd]++;
-		}
+		const mut_fof_t last = m->tv[of].last;
+		/* get us a new sesqll */
+		with (mut_fof_t nx = m->nsesqs++) {
+			m->tv[last].next = nx;
+			m->tv[nx] = (struct sesqll_s){FOF_NOT_FOUND, 0, tvalid};
+			m->tv[of].last = nx;
+		};
 	}
 	return 1;
 }
@@ -503,16 +518,23 @@ static __attribute__((nonnull(1, 2))) size_t
 bang_fsmap(struct fpage_s *restrict p, const struct fsmap_s *m)
 {
 	size_t i;
+	size_t ns;
 
-	i = 0;
-	FOREACH_RBN_KEY(n, mut_oid_t, f, &m->rbt) {
-		const size_t of = n ? m->of[n - 1U] : 0U;
-		const size_t len = m->of[n] - of;
+	i = 0U;
+	FOREACH_KEY(mut_oid_t, f, &m->rbt) {
+		p->facts[i++] = f;
+	}
+	i = 0U;
+	ns = 0U;
+	FOREACH_RBN(n, mut_oid_t, &m->rbt) {
+		mut_fof_t nx = m->of[n];
 
-		p->fof[i] = m->of[n];
-		p->facts[i] = f;
-		memcpy(p->tvalids + i, m->tv + of, len * sizeof(*m->tv));
-		i++;
+		do {
+			p->tvalids[ns++] = m->tv[nx].tv;
+			nx = m->tv[nx].next;
+		} while (!FOF_NOT_FOUND_P(nx));
+
+		p->fof[i++] = ns;
 	}
 	return i;
 }
