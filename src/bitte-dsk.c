@@ -773,7 +773,7 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 			/* tv offset is in p->f->fof */
 			const size_t tvof = p->f->fof[fof];
 			assert(tvof);
-			tv = p->f->tvalids[tvof];
+			tv = p->f->tvalids[tvof - 1U];
 			goto tid_found;
 		}
 	}
