@@ -918,6 +918,7 @@ _close(mut_stor_t s)
 
 	/* materialise */
 	_materialise(_s);
+	_materialise2(_s);
 	/* cleaning up maps */
 	free_tfmap(_s->tfm);
 	/* munmap current page */
