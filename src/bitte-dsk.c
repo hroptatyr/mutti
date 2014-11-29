@@ -495,10 +495,8 @@ fsmap_put(fsmap_t m, mut_oid_t fact, sesquitmp_t tvalid)
 		rb_insert(mut_oid_t)(&m->rbt, nd, fact);
 		/* obtain a new sesqll object */
 		with (mut_fof_t of = m->nsesqs++) {
-			m->tv[of] = (struct sesqll_s){FOF_NOT_FOUND, 0, tvalid};
+			m->tv[of] = (struct sesqll_s){FOF_NOT_FOUND, of, tvalid};
 			m->of[nd] = of;
-			/* 1st == last */
-			m->tv[of].last = of;
 		}
 		return 0;
 	}
