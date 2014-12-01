@@ -1,4 +1,9 @@
 Usage: mutti COMMAND
 
 
+Usage: mutti put [FILE]...
+
+Insert fact and valid time ranges into database.
+
+
 Usage: mutti show
