@@ -6,4 +6,8 @@ Usage: mutti put [FILE]...
 Insert fact and valid time ranges into database.
 
 
-Usage: mutti show
+Usage: mutti get [AS-OF [FACT]...]
+
+Retrieve valid times from database.
+Optionally as of the stamp specified in AS-OF.
+Single facts can also be extracted.

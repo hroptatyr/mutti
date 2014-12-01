@@ -172,8 +172,18 @@ cmd_put(const struct yuck_cmd_put_s argi[static 1U])
 }
 
 static int
-cmd_show(const struct yuck_cmd_show_s argi[static 1U])
+cmd_get(const struct yuck_cmd_get_s argi[static 1U])
 {
+	static const char dfn[] = ".trans";
+	const mut_stor_type_t dty = MUT_STOR_TYPE_DSK;
+	mut_stor_t s;
+
+	if ((s = mut_stor_open(dty, dfn, O_RDONLY)) == NULL) {
+		error("cannot open database file `%s'", dfn);
+		return 1;
+	}
+
+	mut_stor_close(s);
 	return 0;
 }
 
@@ -192,12 +202,13 @@ main(int argc, char *argv[])
 	case MUTTI_CMD_PUT:
 		rc = cmd_put((void*)argi);
 		break;
-	case MUTTI_CMD_SHOW:
-		cmd_show((void*)argi);
+	case MUTTI_CMD_GET:
+		rc = cmd_get((void*)argi);
 		break;
 
 	case MUTTI_CMD_NONE:
 	default:
+		rc = 1;
 		break;
 	}
 
