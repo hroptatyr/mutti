@@ -766,7 +766,9 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 		/* we're so lucky */
 		goto tid_found;
 	}
-	/* disastrous fail, try previous pages */
+	/* disastrous fail, try previous pages
+	 * we know that if we find FACT on one of these, it's
+	 * definitely the latest info on FACT that we've got */
 	for (mut_pno_t pi = s[1U].fz / PGSZ; pi-- > 0U;) {
 		page_t p = _stor_load_page(s + 1U, pi);
 		mut_fof_t fof = fpage_get_fof(p->f, fact);
@@ -790,44 +792,36 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 /* retrieve one fact as of the time stamp specified */
 	/* find the most recent checkpoint before/on AS_OF */
-	mut_pno_t p = PNO_NOT_CACHED;
+	sesquitmp_t tv;
+	sesquitmp_t nx = {ECHS_FOREVER};
 
-#if 0
-	/* build the vfmap */
-	if (!PNO_NOT_CACHED_P(p)) {
-		for (; (int32_t)p < s->fz / PGSZ; p++) {
-			page_t cp = _stor_load_page(s, p);
+	for (mut_pno_t pi = 0U; pi < s[1U].fz / PGSZ; pi++) {
+		page_t p = _stor_load_page(s + 1U, pi);
+		mut_fof_t fof = fpage_get_fof(p->f, fact);
 
-			if (cp->hdr.pty != PTY_CHKPT) {
-				break;
+		if (!FOF_NOT_FOUND_P(fof)) {
+			/* tv offset is in p->f->fof */
+			const size_t ntv = p->f->fof[fof];
+
+			assert(ntv);
+			for (size_t i = fof ? p->f->fof[fof - 1U] : 0U;
+			     i < ntv; i++, tv = nx) {
+				nx = p->f->tvalids[i];
+
+				if (echs_instant_lt_p(as_of, nx.t)) {
+					/* yay, found him before I */
+					goto tid_found;
+				}
 			}
-			/* otherwise add more stuff to the vfmap */
-			;
+			/* reset NX so that we know that we didn't know
+			 * there was a bound on the page */
+			nx.t = ECHS_FOREVER;
 		}
 	}
-
-	/* now look for trans pages */
-	for (; p < s->fz / PGSZ; p++) {
-		const struct page_s *tp = _stor_load_page(s, p);
-
-		if (tp->hdr.pty != PTY_TRANS) {
-			break;
-		} else if (!tp->hdr.ntrans) {
-			break;
-		}
-		/* otherwise go through the transactions */
-		for (mut_tof_t i = 0U; i < tp->hdr.ntrans; i++) {
-			if (!echs_instant_lt_p(tp->trans[i], as_of)) {
-				/* big break, we're too far */
-				goto bang;
-			}
-			/* bang onto vfmap */
-			;
-		}
-	}
-bang:
-#endif
+	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
+tid_found:
+	return (echs_bitmp_t){tv.v, (echs_range_t){tv.t, nx.t}};
 }
 
 
