@@ -839,7 +839,11 @@ _open(const char *fn, int fl)
 		return NULL;
 	} else if (!(fl & O_RDWR)) {
 		/* aaah, read-only, aye aye */
-		;
+		/* fstat the shebang anyway */
+		fstat(fd, &st);
+	} else if (UNLIKELY((res->tfm = make_tfmap(2U * NXPP)) == NULL)) {
+		/* trans->fact map initialisation gone bonkers */
+		goto clo;
 	} else if ((fl & O_TRUNC) && UNLIKELY(ftruncate(fd, PGSZ) < 0)) {
 		goto clo;
 	} else if (UNLIKELY(fstat(fd, &st) < 0)) {
@@ -862,8 +866,6 @@ _open(const char *fn, int fl)
 	res->curp = curp;
 	/* quickly guess the number of transactions */
 	res->fz = st.st_size;
-	/* initialise our maps */
-	res->tfm = make_tfmap(2U * NXPP);
 
 	/* initialise the second guy, fact -> tv sesquis */
 	if (0) {
@@ -871,8 +873,11 @@ _open(const char *fn, int fl)
 	} else if (UNLIKELY((fd = open(".facts", fl, 0666)) < 0)) {
 		goto out;
 	} else if (!(fl & O_RDWR)) {
-		/* aaah, read-only, aye aye */
-		;
+		/* aaah, read-only again, fstat'ing shall be allowed though */
+		fstat(fd, &st);
+	} else if (UNLIKELY((res[1U].fsm = make_fsmap(NXPP)) == NULL)) {
+		/* fact -> sesqui map cunted */
+		goto clo;
 	} else if ((fl & O_TRUNC) && UNLIKELY(ftruncate(fd, PGSZ) < 0)) {
 		goto clo;
 	} else if (UNLIKELY(fstat(fd, &st) < 0)) {
@@ -892,8 +897,6 @@ _open(const char *fn, int fl)
 	res[1U].curp = curp;
 	/* quickly guess the number of transactions */
 	res[1U].fz = st.st_size;
-	/* another fact map */
-	res[1U].fsm = make_fsmap(NXPP);
 	/* yay */
 	return (mut_stor_t)res;
 
@@ -911,19 +914,27 @@ _close(mut_stor_t s)
 	_stor_t _s = (_stor_t)s;
 
 	/* materialise */
-	_materialise(_s);
-	_materialise2(_s);
-	/* cleaning up maps */
-	free_tfmap(_s->tfm);
-	/* munmap current page */
-	munmap(_s->curp, PGSZ);
-	/* close descriptor */
-	close(_s->fd);
-	/* fact->tv mapping */
-	if (_s[1U].fd >= 0) {
+	if (_s->curp != NULL) {
+		_materialise(_s);
+		munmap(_s[0U].curp, PGSZ);
+	}
+	if (_s[1U].curp != NULL) {
+		_materialise2(_s);
 		munmap(_s[1U].curp, PGSZ);
-		close(_s[1U].fd);
+	}
+	/* cleaning up maps */
+	if (_s[0U].tfm) {
+		free_tfmap(_s[0U].tfm);
+	}
+	if (_s[1U].fsm) {
 		free_fsmap(_s[1U].fsm);
+	}
+	/* close descriptor(s) */
+	if (_s[0U].fd >= 0) {
+		close(_s[0U].fd);
+	}
+	if (_s[1U].fd >= 0) {
+		close(_s[1U].fd);
 	}
 	free(_s);
 	return;

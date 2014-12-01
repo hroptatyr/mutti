@@ -102,12 +102,88 @@ strf_bitmp(char *restrict buf, size_t bsz, echs_bitmp_t r)
 	return res;
 }
 
+static int
+_put1(mut_stor_t s, const char *fn)
+{
+	FILE *fp = stdin;
+	char *line = NULL;
+	size_t llen = 0UL;
+
+	if (fn != NULL && (fp = fopen(fn, "r")) == NULL) {
+		error("cannot read file `%s'", fn);
+		return -1;
+	}
+
+	for (ssize_t nrd; (nrd = getline(&line, &llen, fp)) > 0;) {
+		char *on;
+		mut_oid_t x;
+		echs_range_t r;
+
+		if (!(x = strtoul(line, &on, 10)) || *on++ != '\t') {
+			continue;
+		}
+		/* read from value */
+		if (echs_nul_instant_p(r.from = dt_strp(on, &on))) {
+			continue;
+		}
+		/* overread everything that isn't a digit */
+		for (; (*on ^ '0') >= 10; on++);
+		/* read till value */
+		if (echs_nul_instant_p(r.till = dt_strp(on, &on))) {
+			r.till = ECHS_FOREVER;
+		}
+
+		bitte_put(s, x, r);
+	}
+
+	if (line) {
+		free(line);
+	}
+	return 0;
+}
+
 
 #include "mutti.yucc"
 
 static int
-cmd_show(const struct yuck_cmd_show_s argi[static 1U])
+cmd_put(const struct yuck_cmd_put_s argi[static 1U])
 {
+	static const char dfn[] = ".trans";
+	const mut_stor_type_t dty = MUT_STOR_TYPE_DSK;
+	mut_stor_t s;
+	int rc = 0;
+
+	if ((s = mut_stor_open(dty, dfn, O_CREAT | O_RDWR)) == NULL) {
+		error("cannot open database file `%s'", dfn);
+		return 1;
+	}
+	/* make sure we're using one timestamp for everything */
+	echs_set_now(echs_now());
+
+	for (size_t i = 0U; i < argi->nargs; i++) {
+		rc -= _put1(s, argi->args[i]);
+	}
+	if (!argi->nargs) {
+		rc -= _put1(s, NULL);
+	}
+
+	mut_stor_close(s);
+	return rc;
+}
+
+static int
+cmd_get(const struct yuck_cmd_get_s argi[static 1U])
+{
+	static const char dfn[] = ".trans";
+	const mut_stor_type_t dty = MUT_STOR_TYPE_DSK;
+	mut_stor_t s;
+
+	if ((s = mut_stor_open(dty, dfn, O_RDONLY)) == NULL) {
+		error("cannot open database file `%s'", dfn);
+		return 1;
+	}
+
+	mut_stor_close(s);
 	return 0;
 }
 
@@ -123,12 +199,16 @@ main(int argc, char *argv[])
 	}
 
 	switch (argi->cmd) {
-	case MUTTI_CMD_SHOW:
-		cmd_show((void*)argi);
+	case MUTTI_CMD_PUT:
+		rc = cmd_put((void*)argi);
+		break;
+	case MUTTI_CMD_GET:
+		rc = cmd_get((void*)argi);
 		break;
 
 	case MUTTI_CMD_NONE:
 	default:
+		rc = 1;
 		break;
 	}
 
