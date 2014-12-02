@@ -1013,7 +1013,8 @@ _ssd(mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 	echs_bitmp_t v = _get(s, old, ECHS_SOON);
 	int rc = 0;
 
-	if (!echs_nul_range_p(v.valid)) {
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
 		return -1;
 	}
 	/* invalidate old cell */
