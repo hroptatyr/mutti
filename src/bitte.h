@@ -43,14 +43,20 @@
 
 #define ECHS_AS_OF_NOW	ECHS_NOW
 #define ECHS_NUL_BITMP	((echs_bitmp_t){ECHS_NUL_RANGE, ECHS_NUL_RANGE})
+#define ECHS_NUL_SESQUI	((echs_sesqui_t){ECHS_NUL_INSTANT, ECHS_NUL_RANGE})
 
 typedef uint64_t mut_oid_t;
 #define MUT_NUL_OID	((mut_oid_t)0U)
 
 typedef struct {
-	echs_range_t valid;
 	echs_range_t trans;
+	echs_range_t valid;
 } echs_bitmp_t;
+
+typedef struct {
+	echs_instant_t trans;
+	echs_range_t valid;
+} echs_sesqui_t;
 
 typedef struct mut_stor_s *mut_stor_t;
 

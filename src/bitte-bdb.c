@@ -161,7 +161,7 @@ _get_as_of_now(_stor_t _s, mut_oid_t fact)
 		/* that's impossible :O */
 		return ECHS_NUL_BITMP;
 	}
-	return (echs_bitmp_t){t.valid, ECHS_RANGE_FROM(t.trins)};
+	return (echs_bitmp_t){ECHS_RANGE_FROM(t.trins), t.valid};
 }
 
 static echs_bitmp_t
@@ -214,16 +214,16 @@ _get_as_of_then(_stor_t _s, mut_oid_t fact, echs_instant_t as_of)
 		if (TID_NOT_FOUND_P(i_first_after)) {
 			/* must be open-ended */
 			res = (echs_bitmp_t){
+				ECHS_RANGE_FROM(bef.trins),
 				bef.valid,
-				ECHS_RANGE_FROM(bef.trins)
 			};
 			break;
 		}
 		/* otherwise also get the one afterwards */
 		_get_tid(&aft, _s->tr, i_first_after);
 		res = (echs_bitmp_t){
-			bef.valid,
 			(echs_range_t){bef.trins, aft.trins},
+			bef.valid,
 		};
 	}
 
