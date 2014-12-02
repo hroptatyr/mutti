@@ -435,8 +435,8 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 	}
 	/* yay, dead or alive, it's in our books */
 	return (echs_bitmp_t){
-		_stor_get_valid(s, t),
 		ECHS_RANGE_FROM(_stor_get_trans(s, t)),
+		_stor_get_valid(s, t),
 	};
 }
 
@@ -472,19 +472,19 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 	if (TID_NOT_FOUND_P(i_first_after)) {
 		/* must be open-ended */
 		return (echs_bitmp_t){
+			ECHS_RANGE_FROM(_stor_get_trans(s, i_last_before)),
 			_stor_get_valid(s, i_last_before),
-			ECHS_RANGE_FROM(_stor_get_trans(s, i_last_before))
 		};
 	}
 
 	/* yay, dead or alive, it's in our books */
 	/* otherwise it's bounded by trans[I_FIRST_AFTER] */
 	return (echs_bitmp_t){
-		_stor_get_valid(s, i_last_before),
 		(echs_range_t){
 			_stor_get_trans(s, i_last_before),
 			_stor_get_trans(s, i_first_after)
-		}
+		},
+		_stor_get_valid(s, i_last_before),
 	};
 }
 

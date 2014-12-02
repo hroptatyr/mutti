@@ -107,7 +107,7 @@ main(int argc, char *const argv[])
 		n = bitte_hist(NULL, t, 64U, v, f);
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)f);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 
 		puts("");
@@ -116,7 +116,7 @@ main(int argc, char *const argv[])
 		n = bitte_hist(NULL, t, 64U, v, f);
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)f);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 
 		puts("");
@@ -125,7 +125,7 @@ main(int argc, char *const argv[])
 		n = bitte_hist(NULL, t, 64U, v, f);
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)f);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 	}
 	return 0;

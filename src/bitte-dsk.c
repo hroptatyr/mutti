@@ -111,13 +111,8 @@ typedef uint32_t mut_fof_t;
 
 #define ECHS_RANGE_FROM(x)	((echs_range_t){x, ECHS_UNTIL_CHANGED})
 
-/* convenience struct similar to echs_bitmp_t */
-typedef struct {
-	echs_instant_t t;
-	echs_range_t v;
-} sesquitmp_t;
-#define SESQUITMP_NOT_FOUND		((sesquitmp_t){ECHS_NUL_INSTANT})
-#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).t))
+#define SESQUITMP_NOT_FOUND		(ECHS_NUL_SESQUI)
+#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).trans))
 
 /* we have to be 4k long */
 struct pphdr_s {
@@ -194,7 +189,7 @@ struct fpage_s {
 	/* offsets into tvalids, fact I's range is [fof[i - 1], fof[i]) */
 	mut_fof_t fof[NXPP];
 	mut_oid_t facts[NXPP];
-	sesquitmp_t tvalids[2U * NXPP];
+	echs_sesqui_t tvalids[2U * NXPP];
 };
 
 union page_u {
@@ -389,7 +384,7 @@ bang_tfmap(struct tpage_s *restrict p, const struct tfmap_s *m, size_t o)
 struct sesqll_s {
 	mut_fof_t next;
 	mut_fof_t last;
-	sesquitmp_t tv;
+	echs_sesqui_t tv;
 };
 
 typedef struct fsmap_s {
@@ -470,7 +465,7 @@ fsmap_nsesqs(const struct fsmap_s *m)
 	return m->nsesqs;
 }
 
-static inline __attribute__((nonnull(1))) sesquitmp_t
+static inline __attribute__((nonnull(1))) echs_sesqui_t
 fsmap_get(const struct fsmap_s *m, mut_oid_t fact)
 {
 	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
@@ -484,7 +479,7 @@ fsmap_get(const struct fsmap_s *m, mut_oid_t fact)
 }
 
 static inline  __attribute__((nonnull(1))) int
-fsmap_put(fsmap_t m, mut_oid_t fact, sesquitmp_t tvalid)
+fsmap_put(fsmap_t m, mut_oid_t fact, echs_sesqui_t tvalid)
 {
 /* add TVALID to the list of tvalids for FACT. */
 	rbnd_t nd = rb_search(mut_oid_t)(&m->rbt, fact);
@@ -759,7 +754,7 @@ static __attribute__((nonnull(1))) echs_bitmp_t
 _get_as_of_now(_stor_t s, mut_oid_t fact)
 {
 /* retrieve one fact as of the current time stamp */
-	sesquitmp_t tv;
+	echs_sesqui_t tv;
 
 	/* is it in our big fact-cache? */
 	if (!SESQUITMP_NOT_FOUND_P((tv = fsmap_get(s[1U].fsm, fact)))) {
@@ -784,7 +779,7 @@ _get_as_of_now(_stor_t s, mut_oid_t fact)
 	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
 tid_found:
-	return (echs_bitmp_t){tv.v, ECHS_RANGE_FROM(tv.t)};
+	return (echs_bitmp_t){ECHS_RANGE_FROM(tv.trans), tv.valid};
 }
 
 static __attribute__((nonnull(1))) echs_bitmp_t
@@ -792,8 +787,8 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 {
 /* retrieve one fact as of the time stamp specified */
 	/* find the most recent checkpoint before/on AS_OF */
-	sesquitmp_t tv;
-	sesquitmp_t nx = {ECHS_FOREVER};
+	echs_sesqui_t tv;
+	echs_sesqui_t nx = {ECHS_FOREVER};
 
 	for (mut_pno_t pi = 0U; pi < s[1U].fz / PGSZ; pi++) {
 		page_t p = _stor_load_page(s + 1U, pi);
@@ -808,20 +803,20 @@ _get_as_of_then(_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 			     i < ntv; i++, tv = nx) {
 				nx = p->f->tvalids[i];
 
-				if (echs_instant_lt_p(as_of, nx.t)) {
+				if (echs_instant_lt_p(as_of, nx.trans)) {
 					/* yay, found him before I */
 					goto tid_found;
 				}
 			}
 			/* reset NX so that we know that we didn't know
 			 * there was a bound on the page */
-			nx.t = ECHS_FOREVER;
+			nx.trans = ECHS_FOREVER;
 		}
 	}
 	/* nah, next time maybe */
 	return ECHS_NUL_BITMP;
 tid_found:
-	return (echs_bitmp_t){tv.v, (echs_range_t){tv.t, nx.t}};
+	return (echs_bitmp_t){(echs_range_t){tv.trans, nx.trans}, tv.valid};
 }
 
 
@@ -978,7 +973,7 @@ _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 		}
 	}
 	/* and bang onto fact line */
-	if (fsmap_put(_s[1U].fsm, fact, (sesquitmp_t){t, valid}) == 0) {
+	if (fsmap_put(_s[1U].fsm, fact, (echs_sesqui_t){t, valid}) == 0) {
 		_s[1U].curp->f->hdr.ntvalids++;
 	}
 
@@ -1018,7 +1013,8 @@ _ssd(mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 	echs_bitmp_t v = _get(s, old, ECHS_SOON);
 	int rc = 0;
 
-	if (!echs_nul_range_p(v.valid)) {
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
 		return -1;
 	}
 	/* invalidate old cell */

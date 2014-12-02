@@ -62,6 +62,9 @@
 #define PROT_RW		(PROT_READ | PROT_WRITE)
 #define MAP_MEM		(MAP_PRIVATE | MAP_ANON)
 
+#define SESQUITMP_NOT_FOUND		(ECHS_NUL_SESQUI)
+#define SESQUITMP_NOT_FOUND_P(x)	(echs_nul_instant_p((x).trans))
+
 typedef uint32_t mut_tid_t;
 
 struct trns_s {
@@ -108,40 +111,21 @@ _get_tid(struct trns_s *restrict t, DB *trm, mut_tid_t i)
 	return TID_NOT_FOUND;
 }
 
-static struct fact_s
+static echs_sesqui_t
 _get_fact(DB *ftm, mut_oid_t fact)
 {
-	struct fact_s f;
+	echs_sesqui_t res;
 	DBT fk = {&fact, sizeof(fact)};
-	DBT fv = {.data = &f, .ulen = sizeof(f), .flags = DB_DBT_USERMEM};
+	DBT fv = {.data = &res, .ulen = sizeof(res), .flags = DB_DBT_USERMEM};
 
 	switch (ftm->get(ftm, NULL, &fk, &fv, 0)) {
 	case 0:
 		/* found */
-		return f;
+		return res;
 	default:
 		break;
 	}
-	return FACT_NOT_FOUND;
-}
-
-static int
-_put_last_trans(DB *ftm, mut_oid_t fact, mut_tid_t last)
-{
-	/* set up fact mapping */
-	struct fact_s f;
-
-	if (FACT_NOT_FOUND_P((f = _get_fact(ftm, fact)))) {
-		f._1st = last;
-	}
-	f.last = last;
-
-	with (DBT fk = {&fact, sizeof(fact)}, fv = {&f, sizeof(f)}) {
-		if (ftm->put(ftm, NULL, &fk, &fv, 0) < 0) {
-			return -1;
-		}
-	}
-	return 0;
+	return SESQUITMP_NOT_FOUND;
 }
 
 
@@ -149,19 +133,13 @@ _put_last_trans(DB *ftm, mut_oid_t fact, mut_tid_t last)
 static echs_bitmp_t
 _get_as_of_now(_stor_t _s, mut_oid_t fact)
 {
-	struct fact_s f = _get_fact(_s->ft, fact);
-	struct trns_s t;
+	echs_sesqui_t fs = _get_fact(_s->ft, fact);
 
-	if (FACT_NOT_FOUND_P(f)) {
+	if (SESQUITMP_NOT_FOUND_P(fs)) {
 		/* must be dead */
 		return ECHS_NUL_BITMP;
 	}
-	/* yay, dead or alive, it's in our books */
-	if (UNLIKELY(TID_NOT_FOUND_P(_get_tid(&t, _s->tr, f.last)))) {
-		/* that's impossible :O */
-		return ECHS_NUL_BITMP;
-	}
-	return (echs_bitmp_t){t.valid, ECHS_RANGE_FROM(t.trins)};
+	return (echs_bitmp_t){ECHS_RANGE_FROM(fs.trans), fs.valid};
 }
 
 static echs_bitmp_t
@@ -214,16 +192,16 @@ _get_as_of_then(_stor_t _s, mut_oid_t fact, echs_instant_t as_of)
 		if (TID_NOT_FOUND_P(i_first_after)) {
 			/* must be open-ended */
 			res = (echs_bitmp_t){
+				ECHS_RANGE_FROM(bef.trins),
 				bef.valid,
-				ECHS_RANGE_FROM(bef.trins)
 			};
 			break;
 		}
 		/* otherwise also get the one afterwards */
 		_get_tid(&aft, _s->tr, i_first_after);
 		res = (echs_bitmp_t){
-			bef.valid,
 			(echs_range_t){bef.trins, aft.trins},
+			bef.valid,
 		};
 	}
 
@@ -302,24 +280,39 @@ _close(mut_stor_t s)
 static int
 _put(mut_stor_t s, mut_oid_t fact, echs_range_t valid)
 {
+	_stor_t _s = (_stor_t)s;
+	echs_sesqui_t prev;
+
 	if (UNLIKELY(fact == MUT_NUL_OID)) {
 		return -1;
 	}
-	/* stamp off then */
-	with (_stor_t _s = (_stor_t)s) {
-		struct trns_s t = {echs_now(), fact, valid};
-		DBT k = {NULL};
-		DBT v = {.data = &t, .size = sizeof(t)};
-
-		if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
-			return -1;
+	/* let's see what we've got */
+	if (!SESQUITMP_NOT_FOUND_P((prev = _get_fact(_s->ft, fact)))) {
+		if (echs_range_eq_p(prev.valid, valid)) {
+			/* do fuckall, it's in the db already */
+			return 1;
 		}
+	}
+	/* we're good to go now */
+	with (echs_instant_t now = echs_now()) {
+		with (struct trns_s t = {now, fact, valid}) {
+			DBT v = {.data = &t, .size = sizeof(t)};
 
-		/* put fact mapping */
-		assert(k.size == sizeof(mut_tid_t));
-		_put_last_trans(_s->ft, fact, *(mut_tid_t*)k.data);
+			if (_s->tr->put(_s->tr, NULL, NULL, &v, DB_APPEND) < 0) {
+				return -1;
+			}
+		}
+		/* fact mapping */
+		with (echs_sesqui_t last = {now, valid}) {
+			DBT f = {.data = &fact, .size = sizeof(fact)};
+			DBT v = {.data = &last, .size = sizeof(last)};
+
+			if (_s->ft->put(_s->ft, NULL, &f, &v, 0) < 0) {
+				return -1;
+			}
+		}
 		/* place last trans stamp */
-		_s->trins = t.trins;
+		_s->trins = now;
 	}
 	return 0;
 }
@@ -345,90 +338,39 @@ _get(mut_stor_t s, mut_oid_t fact, echs_instant_t as_of)
 static int
 _rem(mut_stor_t s, mut_oid_t fact)
 {
-	_stor_t _s = (_stor_t)s;
-	struct fact_s f = _get_fact(_s->ft, fact);
-	struct trns_s t;
+/* rem is short for
+ * v <- _get(fact)
+ * if (v) _put(fact, (echs_range_t){[)}) */
+	echs_bitmp_t v = _get(s, fact, ECHS_SOON);
 
-	if (FACT_NOT_FOUND_P(f)) {
-		/* he's dead already */
-		return -1;
-	} else if (TID_NOT_FOUND_P(_get_tid(&t, _s->tr, f.last))) {
-		/* huh? something's seriously out of sync */
-		return -1;
-	} else if (echs_nul_range_p(t.valid)) {
-		/* dead already, just */
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
 		return -1;
 	}
-
-	/* stamp him off */
-	with (echs_instant_t now = echs_now()) {
-		DBT k = {NULL};
-		DBT v = {.data = &t, .size = sizeof(t)};
-
-		t = (struct trns_s){now, fact, echs_nul_range()};
-		if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
-			return -1;
-		}
-
-		/* put fact mapping */
-		assert(k.size == sizeof(mut_tid_t));
-		_put_last_trans(_s->ft, fact, *(mut_tid_t*)k.data);
-		/* place last trans stamp */
-		_s->trins = now;
-	}
-	return 0;
+	/* otherwise kill him */
+	return _put(s, fact, ECHS_NUL_RANGE);
 }
 
 static int
 _ssd(
 	mut_stor_t s, mut_oid_t old, mut_oid_t new, echs_range_t valid)
 {
-	_stor_t _s = (_stor_t)s;
-	const struct fact_s f = _get_fact(_s->ft, old);
-	struct trns_s last;
+/* ssd (supersede) is short for
+ * v <- _get(old)
+ * _put(old, (echs_range_t){[v.from, valid.from)})
+ * _put(new, valid) */
+	echs_bitmp_t v = _get(s, old, ECHS_SOON);
+	int rc = 0;
 
-	if (FACT_NOT_FOUND_P(f)) {
-		/* must be dead, cannot supersede */
-		return -1;
-	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
-		/* must be dead, cannot supersede */
+	if (echs_nul_range_p(v.valid)) {
+		/* dead already */
 		return -1;
 	}
-	/* atomically handle the supersedure */
-	with (echs_instant_t now = echs_now()) {
-		/* old guy first */
-		DBT k = {NULL};
-		DBT v = {
-			.data = &(struct trns_s){
-				now, old,
-				/* new validity */
-				{last.valid.from, valid.from}
-			},
-			.size = sizeof(struct trns_s)
-		};
-
-		if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
-			return -1;
-		}
-
-		/* put fact mapping */
-		assert(k.size == sizeof(mut_tid_t));
-		_put_last_trans(_s->ft, old, *(mut_tid_t*)k.data);
-		/* place last trans stamp */
-		_s->trins = now;
-
-		/* new guy next */
-		if (new != MUT_NUL_OID) {
-			v.data = &(struct trns_s){now, new, valid};
-
-			if (_s->tr->put(_s->tr, NULL, &k, &v, DB_APPEND) < 0) {
-				return -1;
-			}
-
-			_put_last_trans(_s->ft, new, *(mut_tid_t*)k.data);
-		}
-	}
-	return 0;
+	/* invalidate old cell */
+	rc += _put(s, old, (echs_range_t){v.valid.from, valid.from});
+	/* punch new cell */
+	rc += _put(s, new, valid);
+	return rc;
 }
 
 static size_t
@@ -438,15 +380,11 @@ _hist(
 	echs_range_t *restrict valid, mut_oid_t fact)
 {
 	_stor_t _s = (_stor_t)s;
-	const struct fact_s f = _get_fact(_s->ft, fact);
-	struct trns_s last;
+	echs_sesqui_t fs = _get_fact(_s->ft, fact);
 	size_t res = 0U;
 	DBC *c;
 
-	if (FACT_NOT_FOUND_P(f)) {
-		/* no last transaction, so no first either */
-		return 0U;
-	} else if (TID_NOT_FOUND_P(_get_tid(&last, _s->tr, f.last))) {
+	if (SESQUITMP_NOT_FOUND_P(fs)) {
 		/* no last transaction, so no first either */
 		return 0U;
 	}
