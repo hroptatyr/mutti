@@ -109,7 +109,7 @@ main(int argc, char *const argv[])
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 
 		puts("");
@@ -119,7 +119,7 @@ main(int argc, char *const argv[])
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 
 		puts("");
@@ -129,7 +129,7 @@ main(int argc, char *const argv[])
 
 		for (size_t i = 0U; i < n; i++) {
 			fprintf(stdout, "fact %s\t", (const char*)o[i]);
-			pr_bitmp((echs_bitmp_t){v[i], t[i]});
+			pr_bitmp((echs_bitmp_t){t[i], v[i]});
 		}
 	}
 	return 0;
