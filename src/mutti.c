@@ -142,6 +142,20 @@ _put1(mut_stor_t s, const char *fn)
 	return 0;
 }
 
+static mut_stor_type_t
+get_storage(const char *storname)
+{
+	if (storname == NULL) {
+		;
+	} else if (!strcmp(storname, "bdb")) {
+		return MUT_STOR_TYPE_BDB;
+	} else if (!strcmp(storname, "mem")) {
+		return MUT_STOR_TYPE_MEM;
+	}
+	/* default storage */
+	return MUT_STOR_TYPE_DSK;
+}
+
 
 #include "mutti.yucc"
 
@@ -149,7 +163,7 @@ static int
 cmd_put(const struct yuck_cmd_put_s argi[static 1U])
 {
 	static const char dfn[] = ".trans";
-	const mut_stor_type_t dty = MUT_STOR_TYPE_DSK;
+	const mut_stor_type_t dty = get_storage(argi->storage_arg);
 	mut_stor_t s;
 	int rc = 0;
 
