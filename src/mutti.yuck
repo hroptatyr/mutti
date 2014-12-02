@@ -5,6 +5,8 @@ Usage: mutti put [FILE]...
 
 Insert fact and valid time ranges into database.
 
+  -s, --storage=TYPE    Use TYPE for storage.
+
 
 Usage: mutti get [AS-OF [FACT]...]
 
